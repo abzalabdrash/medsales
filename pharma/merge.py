@@ -27,7 +27,7 @@ DEFAULT_MEDPRICE = Path(r"C:\Users\abdra\Projects\med\data\medprice.db")
 
 SERVICE_TABLES = ["brand", "branch", "canonical_service", "price", "review", "price_snapshot"]
 PHARMA_TABLES = ["drug_ref", "drug_offer", "pharmacy", "free_drug",
-                 "inn_price_cap", "place_geo"]
+                 "inn_price_cap", "place_geo", "place_review"]
 
 CITY_SLUG = {
     "Алматы": "almaty", "Астана": "astana", "Шымкент": "shymkent",
@@ -197,10 +197,32 @@ def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
     body = f"{service_part} UNION ALL {drug_part}" if service_part else drug_part
     con.execute(f"CREATE VIEW v_item AS {body}")
 
+    # --- v_review: отзывы обоих источников, но источник виден всегда ------
+    # Шкалы и базы у 103.kz и 2GIS разные, поэтому не усредняем и не смешиваем —
+    # просто складываем рядом с пометкой, откуда взято.
+    parts = []
+    if stats.get("review", -1) > 0:
+        parts.append("""
+            SELECT '103kz' AS source, r.brand_id AS place_id, 'clinic' AS kind,
+                   r.rating, r.text, r.author, r.created_at
+            FROM review r
+        """)
+    if stats.get("place_review", -1) > 0:
+        parts.append("""
+            SELECT pr.source, pr.place_id, pr.kind,
+                   pr.rating, pr.text, pr.author, pr.created_at
+            FROM place_review pr
+        """)
+    if parts:
+        con.execute("CREATE VIEW v_review AS " + " UNION ALL ".join(parts))
+        con.execute("CREATE INDEX IF NOT EXISTS ix_prev_place ON place_review(place_id)")
+
     con.commit()
     counts = {
         "v_place": con.execute("SELECT COUNT(*) FROM v_place").fetchone()[0],
         "v_item": con.execute("SELECT COUNT(*) FROM v_item").fetchone()[0],
+        "v_review": (con.execute("SELECT COUNT(*) FROM v_review").fetchone()[0]
+                     if parts else 0),
     }
     con.close()
     return {**stats, **counts}
@@ -219,3 +241,4 @@ if __name__ == "__main__":
     print("  " + "-" * 30)
     print(f"  {'v_place (view)':20} {s['v_place']:>8}")
     print(f"  {'v_item  (view)':20} {s['v_item']:>8}")
+    print(f"  {'v_review (view)':20} {s['v_review']:>8}")

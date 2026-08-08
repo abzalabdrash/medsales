@@ -54,7 +54,10 @@ def expand_table(table: Node) -> list[list[str | None]]:
 
             cell = cells[ci]
             ci += 1
-            val = _clean(cell.text(strip=True))
+            # separator=" " обязателен: без него текст соседних тегов слипается
+            # («Нурофен» + «для детей» -> «Нурофендля детей»), и такое имя
+            # уже невозможно сматчить с названием на витрине аптеки
+            val = _clean(cell.text(separator=" ", strip=True))
             rs, cs = _span(cell, "rowspan"), _span(cell, "colspan")
             for k in range(cs):
                 row.append(val)

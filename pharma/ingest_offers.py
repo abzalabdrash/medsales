@@ -19,10 +19,46 @@ RAW_PATH = Path(__file__).resolve().parent.parent / "data" / "raw_offers_europha
 _PACK_IN_NAME = re.compile(r"[№N]\s*(\d+)", re.IGNORECASE)
 
 
-def _brand_key(name: str) -> str:
-    """Первое слово названия — обычно торговая марка. Грубо, но быстро сужает поиск."""
+BUCKET_LEN = 3
+
+# Мусор, который есть на витрине аптеки и которого нет в торговом наименовании:
+# дозировки, фасовки, лекформы. Сравнивать «Клотримазол-Тева крем 1% 30 г крем»
+# с «Клотримазол» как есть — значит утопить верный матч до 55 баллов.
+_NOISE = re.compile(
+    r"\b(?:табл?\w*|капс\w*|амп\w*|фл\w*|шт|уп\w*|пак\w*|саше|гран\w*|"
+    r"мазь|крем\w*|гел[ья]?|сироп\w*|р[- ]?р|раствор\w*|сусп\w*|порош\w*|"
+    r"супп\w*|свеч\w*|спрей|аэроз\w*|кап(?:ли|ель)?|драже|"
+    r"покрыт\w*|плён\w*|плен\w*|оболоч\w*|кишечнораст\w*|п/о|п/плён\w*|"
+    r"мг|мкг|мл|гр?|ме|ед|%)\b", re.IGNORECASE)
+# Внимание на "no": norm_name прогоняет NFKC, а тот раскладывает знак «№»
+# (U+2116) в две буквы «No». Без явной обработки от «№20» оставался хвост
+# «no», который портил и марочную часть, и ключ бакета.
+_NUMS = re.compile(r"(?:№|no|n)\s*\d+[.,]?\d*|\d+[.,]?\d*\s*%?|%", re.IGNORECASE)
+
+
+def brand_head(name: str) -> str:
+    """Марочная часть названия: без дозировок, фасовок и лекформ.
+
+    «Клотримазол-Тева крем 1% 30 г крем» -> «клотримазол тева»
+    «ИБУФЕН, 200 мг, №20 таблетки»       -> «ибуфен»
+    Именно это сравнивается с торговым наименованием из реестра.
+    """
     n = norm_name(name)
-    return n.split(" ")[0] if n else ""
+    n = _NUMS.sub(" ", n)
+    n = _NOISE.sub(" ", n)
+    return " ".join(n.split())
+
+
+def _brand_key(name: str) -> str:
+    """Ключ бакета: первые 3 символа марочной части без пробелов.
+
+    Пять символов брать нельзя: в реестре встречаются короткие марки («Пан®»),
+    их ключ выходил трёхсимвольным и никогда не совпадал с пятисимвольным
+    ключом витрины («пан40»). Три символа дают бакеты побольше, зато ключ
+    одинаковой длины для любого названия, а точность добирается скорингом.
+    """
+    n = brand_head(name).replace(" ", "")
+    return n[:BUCKET_LEN] if n else ""
 
 
 def match_offers(session, offers, *, threshold: int = 88) -> Counter:
@@ -50,9 +86,10 @@ def match_offers(session, offers, *, threshold: int = 88) -> Counter:
             o.drug_ref_id = None
             continue
 
-        target = norm_name(name)
+        # сравниваем марку с маркой: обе стороны очищены от дозировок и форм
+        target = brand_head(name)
         best = process.extractOne(
-            target, [norm_name(r.tn) for r in bucket], scorer=fuzz.token_set_ratio)
+            target, [brand_head(r.tn) for r in bucket], scorer=fuzz.token_set_ratio)
         if not best or best[1] < threshold:
             stats["low_score"] += 1
             o.drug_ref_id = None

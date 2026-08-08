@@ -14,8 +14,9 @@ import re
 import time
 from dataclasses import dataclass
 
-import httpx
 from selectolax.parser import HTMLParser
+
+from ._fetch import get_cached
 
 UA = {"User-Agent": "MedRouteKZ/1.0 (hackathon research; contact: abdrashabzal.bs@gmail.com)",
       "Accept-Language": "ru-RU,ru;q=0.9"}
@@ -84,24 +85,30 @@ def _pick_price_table(doc: HTMLParser):
         rows = tb.css("tr")
         if len(rows) < 20:
             continue
-        head = " ".join(c.text(strip=True).lower() for c in rows[0].css("td,th"))
+        head = " ".join(c.text(separator=" ", strip=True).lower() for c in rows[0].css("td,th"))
         if sum(h in head for h in _HEADER_HINTS) >= 2:
             if best is None or len(rows) > len(best.css("tr")):
                 best = tb
     return best
 
 
-def fetch_order(doc: str, *, timeout: float = 60.0) -> list[AdiletRow]:
+def fetch_order(doc: str, *, refresh: bool = False) -> list[AdiletRow]:
+    """Приказ с диска, при первом обращении — из сети.
+
+    adilet при частых обращениях рвёт соединение (SSL DECRYPTION_FAILED,
+    WinError 10054). Без кэша это выглядело как «данные пропали»: fetch_all
+    ловит ошибку по каждому документу отдельно, и справочник молча собирался
+    из одного приказа вместо трёх — 4 300 позиций вместо 10 047.
+    Документы меняются раз в месяцы, поэтому кэш здесь безопасен.
+    """
     url = BASE.format(doc=doc)
-    r = httpx.get(url, timeout=timeout, verify=False, headers=UA, follow_redirects=True)
-    r.raise_for_status()
-    tree = HTMLParser(r.text)
+    tree = HTMLParser(get_cached(url, key=f"adilet_{doc}", refresh=refresh))
     table = _pick_price_table(tree)
     if table is None:
         return []
 
     rows = table.css("tr")
-    header = [c.text(strip=True).lower() for c in rows[0].css("td,th")]
+    header = [c.text(separator=" ", strip=True).lower() for c in rows[0].css("td,th")]
 
     def col(*names: str, default: int | None = None) -> int | None:
         for i, h in enumerate(header):
@@ -120,7 +127,7 @@ def fetch_order(doc: str, *, timeout: float = 60.0) -> list[AdiletRow]:
 
     out: list[AdiletRow] = []
     for tr in rows[1:]:
-        c = [x.text(strip=True) for x in tr.css("td")]
+        c = [x.text(separator=" ", strip=True) for x in tr.css("td")]
         if len(c) < 4:
             continue
         tn = _clean(c[i_tn]) if i_tn is not None and i_tn < len(c) else None

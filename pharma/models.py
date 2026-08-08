@@ -178,6 +178,26 @@ class PlaceGeo(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class PlaceReview(Base):
+    """Текст отзыва о клинике или аптеке.
+
+    Хранится отдельно от таблицы review (та пришла из 103.kz), потому что
+    шкалы и базы отзывов у источников разные — смешивать их в одной таблице
+    значит получить среднее, которое ничего не значит.
+    """
+    __tablename__ = "place_review"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    place_id: Mapped[str] = mapped_column(String(48), index=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)
+    twogis_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    rating: Mapped[float | None] = mapped_column(Float)
+    text: Mapped[str] = mapped_column(Text)
+    author: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[str | None] = mapped_column(String(48))
+    likes: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String(16), default="2gis", index=True)
+
+
 class PriceAudit(Base):
     """Почему цена принята или отвергнута — для объяснимости и для защиты перед жюри."""
     __tablename__ = "price_audit"
