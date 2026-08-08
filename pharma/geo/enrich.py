@@ -139,7 +139,7 @@ def enrich_clinics(source_db: Path, keys: list[str], *, city: str | None = None,
             weak += 1
             continue
         session.merge(PlaceGeo(
-            place_id=r["id"], kind="clinic", twogis_id=best.twogis_id,
+            place_id=r["id"], kind="clinic", city=r["city"], twogis_id=best.twogis_id,
             twogis_url=firm_url(best.twogis_id, r["city"]), name_2gis=best.name,
             address=best.address, lat=best.lat, lng=best.lng,
             rating=best.rating, reviews_count=best.reviews_count, match_score=score,
@@ -177,7 +177,7 @@ def enrich_pharmacies(keys: list[str], cities: list[str], *, pages: int = 5) -> 
                 break
             for p in places:
                 session.merge(PlaceGeo(
-                    place_id=f"ph2gis_{p.twogis_id}", kind="pharmacy",
+                    place_id=f"ph2gis_{p.twogis_id}", kind="pharmacy", city=city_slug(city),
                     twogis_id=p.twogis_id, twogis_url=firm_url(p.twogis_id, city),
                     name_2gis=p.name, address=p.address, lat=p.lat, lng=p.lng,
                     rating=p.rating, reviews_count=p.reviews_count, match_score=100.0,

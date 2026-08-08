@@ -165,6 +165,7 @@ class PlaceGeo(Base):
     __tablename__ = "place_geo"
     place_id: Mapped[str] = mapped_column(String(48), primary_key=True)
     kind: Mapped[str] = mapped_column(String(16), index=True)   # clinic | pharmacy
+    city: Mapped[str | None] = mapped_column(String(64), index=True)
     twogis_id: Mapped[str | None] = mapped_column(String(64), index=True)
     twogis_url: Mapped[str | None] = mapped_column(String(512))
     name_2gis: Mapped[str | None] = mapped_column(String(255))

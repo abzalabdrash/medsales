@@ -26,7 +26,8 @@ PHARMA_DB = DATA / "pharma.db"
 DEFAULT_MEDPRICE = Path(r"C:\Users\abdra\Projects\med\data\medprice.db")
 
 SERVICE_TABLES = ["brand", "branch", "canonical_service", "price", "review", "price_snapshot"]
-PHARMA_TABLES = ["drug_ref", "drug_offer", "pharmacy", "free_drug", "inn_price_cap"]
+PHARMA_TABLES = ["drug_ref", "drug_offer", "pharmacy", "free_drug",
+                 "inn_price_cap", "place_geo"]
 
 CITY_SLUG = {
     "Алматы": "almaty", "Астана": "astana", "Шымкент": "shymkent",
@@ -78,6 +79,50 @@ def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
         for t in SERVICE_TABLES:
             stats[t] = -1
 
+    # --- наложение обогащения 2GIS --------------------------------------
+    # place_geo собрано за квоту ключа и живёт отдельно, чтобы пересборка
+    # сводной базы его не стирала. Здесь оно накладывается на копии таблиц.
+    if stats.get("place_geo", -1) > 0 and stats.get("branch", -1) > 0:
+        for col, decl in [("twogis_id", "TEXT"), ("twogis_url", "TEXT"),
+                          ("twogis_rating", "REAL"), ("twogis_reviews", "INTEGER")]:
+            try:
+                con.execute(f"ALTER TABLE branch ADD COLUMN {col} {decl}")
+            except sqlite3.OperationalError:
+                pass
+        con.execute("""
+            UPDATE branch SET
+              lat = COALESCE(lat, (SELECT g.lat FROM place_geo g WHERE g.place_id = branch.id)),
+              lng = COALESCE(lng, (SELECT g.lng FROM place_geo g WHERE g.place_id = branch.id)),
+              address = COALESCE(address, (SELECT g.address FROM place_geo g WHERE g.place_id = branch.id)),
+              twogis_id     = (SELECT g.twogis_id     FROM place_geo g WHERE g.place_id = branch.id),
+              twogis_url    = (SELECT g.twogis_url    FROM place_geo g WHERE g.place_id = branch.id),
+              twogis_rating = (SELECT g.rating        FROM place_geo g WHERE g.place_id = branch.id),
+              twogis_reviews= (SELECT g.reviews_count FROM place_geo g WHERE g.place_id = branch.id)
+            WHERE EXISTS (SELECT 1 FROM place_geo g WHERE g.place_id = branch.id)
+        """)
+        # рейтинг из 2GIS используем только там, где своего нет:
+        # 103.kz и 2GIS считают по-разному, смешивать их в одном поле нельзя
+        con.execute("UPDATE branch SET rating = twogis_rating "
+                    "WHERE rating IS NULL AND twogis_rating IS NOT NULL")
+        con.execute("UPDATE branch SET reviews_count = twogis_reviews "
+                    "WHERE reviews_count IS NULL AND twogis_reviews IS NOT NULL")
+        stats["branch_enriched"] = con.execute(
+            "SELECT COUNT(*) FROM branch WHERE twogis_id IS NOT NULL").fetchone()[0]
+
+    # аптеки из 2GIS переносим в таблицу pharmacy
+    if stats.get("place_geo", -1) > 0:
+        con.execute("""
+            INSERT OR REPLACE INTO pharmacy
+              (id, chain, name, city, address, lat, lng, rating, reviews_count,
+               twogis_id, has_compounding, source)
+            SELECT g.place_id,
+                   TRIM(SUBSTR(g.name_2gis, 1, COALESCE(NULLIF(INSTR(g.name_2gis, ','), 0) - 1, LENGTH(g.name_2gis)))),
+                   g.name_2gis, COALESCE(g.city, ''), g.address, g.lat, g.lng, g.rating, g.reviews_count,
+                   g.twogis_id, 0, '2gis'
+            FROM place_geo g WHERE g.kind = 'pharmacy'
+        """)
+        stats["pharmacy"] = con.execute("SELECT COUNT(*) FROM pharmacy").fetchone()[0]
+
     # --- индексы: без них джойн препаратов к предложениям ползёт ---------
     for stmt in [
         "CREATE INDEX IF NOT EXISTS ix_offer_ref   ON drug_offer(drug_ref_id)",
@@ -106,9 +151,10 @@ def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
         SELECT 'clinic' AS kind, b.id AS place_id, br.name AS org_name,
                b.name AS place_name, b.city, b.address, b.lat, b.lng,
                b.rating, b.reviews_count, b.working_hours, b.phone,
-               NULL AS twogis_id, 0 AS has_compounding,
-               'https://2gis.kz/' || {_city_case('b.city')} || '/search/' ||
-                   replace(COALESCE(b.address, b.name), ' ', '%20') AS twogis_search_url
+               b.twogis_id, 0 AS has_compounding,
+               COALESCE(b.twogis_url,
+                        'https://2gis.kz/' || {_city_case('b.city')} || '/search/' ||
+                        replace(COALESCE(b.address, b.name), ' ', '%20')) AS twogis_search_url
         FROM branch b LEFT JOIN brand br ON br.id = b.brand_id
     """ if has_branch else ""
 
