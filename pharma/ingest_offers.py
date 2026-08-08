@@ -115,6 +115,37 @@ def match_offers(session, offers, *, threshold: int = 88) -> Counter:
     return stats
 
 
+def _biosfera_rows() -> list[DrugOffer]:
+    """Предложения «Биосферы» в общем виде.
+
+    Вторая сеть — это не «ещё немного строк», а появление самого сравнения:
+    до неё у каждого препарата была ровно одна цена, и обещание «покажем, где
+    дешевле» держалось на честном слове.
+    """
+    from .sources import biosfera
+
+    path = RAW_PATH.with_name("raw_offers_biosfera.json")
+    if path.exists():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        raw = [biosfera.Offer(**d) for d in data]
+        print(f"  [biosfera] из кэша: {len(raw)}")
+    else:
+        raw = biosfera.scrape()
+        path.write_text(json.dumps([asdict(o) for o in raw], ensure_ascii=False),
+                        encoding="utf-8")
+
+    return [
+        DrugOffer(
+            id=det_id("of", "biosfera", o.sku),
+            chain=biosfera.CHAIN, sku=o.sku, name_raw=o.name,
+            price_kzt=o.price_kzt, in_stock=o.in_stock,
+            source="biosfera", source_url=o.url,
+        )
+        for o in raw
+        if o.name
+    ]
+
+
 def _dump_raw(raw: list) -> None:
     """Сырые предложения на диск СРАЗУ после обхода.
 
@@ -134,9 +165,21 @@ def _load_raw() -> list:
 
 
 def run(max_categories: int | None = None, max_pages: int = 200,
-        from_cache: bool = False) -> dict:
+        from_cache: bool = False, sources: tuple[str, ...] = ("europharma",)) -> dict:
     init_db()
     session = get_session()
+
+    rows: list[DrugOffer] = []
+    if "biosfera" in sources:
+        rows.extend(_biosfera_rows())
+        session.query(DrugOffer).filter(DrugOffer.source == "biosfera").delete()
+    if "europharma" not in sources:
+        stats = match_offers(session, rows)
+        session.add_all(rows)
+        session.commit()
+        _report(stats)
+        session.close()
+        return dict(stats)
 
     if from_cache and RAW_PATH.exists():
         raw = _load_raw()
@@ -147,7 +190,6 @@ def run(max_categories: int | None = None, max_pages: int = 200,
     print(f"\n  [ingest] собрано предложений: {len(raw)}")
 
     session.query(DrugOffer).filter(DrugOffer.source == "europharma").delete()
-    rows: list[DrugOffer] = []
     for o in raw:
         rows.append(DrugOffer(
             id=det_id("of", "europharma", o.sku),
@@ -183,5 +225,8 @@ if __name__ == "__main__":
                     help="ограничить число категорий (для быстрой проверки)")
     ap.add_argument("--from-cache", action="store_true",
                     help="взять прошлый обход из raw_offers_*.json, не ходя в сеть")
+    ap.add_argument("--sources", default="europharma",
+                    help="через запятую: europharma, biosfera")
     a = ap.parse_args()
-    run(max_categories=a.categories, from_cache=a.from_cache)
+    run(max_categories=a.categories, from_cache=a.from_cache,
+        sources=tuple(s.strip() for s in a.sources.split(",") if s.strip()))

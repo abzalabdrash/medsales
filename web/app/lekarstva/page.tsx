@@ -5,7 +5,14 @@ import { getLocale } from "@/lib/i18n.server";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DrugCard } from "@/components/DrugCard";
 import { DrugSearch } from "@/components/DrugSearch";
-import { listDrugs, searchDrugs, drugTotals } from "@/lib/drugs";
+import {
+  listDrugs,
+  searchDrugs,
+  drugTotals,
+  listByAtcGroup,
+  atcGroupCounts,
+  ATC_GROUPS,
+} from "@/lib/drugs";
 import { withCity } from "@/lib/url";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +22,13 @@ const PAGE_SIZE = 48;
 export default async function DrugsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ city?: string; q?: string; rx?: string; page?: string }>;
+  searchParams: Promise<{
+    city?: string;
+    q?: string;
+    rx?: string;
+    page?: string;
+    g?: string;
+  }>;
 }) {
   const locale = await getLocale();
   const t = getDict(locale);
@@ -24,16 +37,20 @@ export default async function DrugsPage({
   const q = (sp.q ?? "").trim();
   const onlyRx = sp.rx === "1";
   const page = Math.max(1, Number(sp.page ?? 1) || 1);
+  const group = (sp.g ?? "").toUpperCase().slice(0, 1);
 
   const items = q
     ? searchDrugs(q, PAGE_SIZE)
-    : listDrugs({
-        onlyRx,
-        onlyMatched: true,
-        limit: PAGE_SIZE,
-        offset: (page - 1) * PAGE_SIZE,
-      });
+    : group
+      ? listByAtcGroup(group, PAGE_SIZE, (page - 1) * PAGE_SIZE)
+      : listDrugs({
+          onlyRx,
+          onlyMatched: true,
+          limit: PAGE_SIZE,
+          offset: (page - 1) * PAGE_SIZE,
+        });
   const totals = drugTotals();
+  const counts = atcGroupCounts();
 
   return (
     <main className="mx-auto w-full max-w-[1100px] px-4 py-6 sm:px-6">
@@ -56,17 +73,31 @@ export default async function DrugsPage({
       </div>
 
       {!q && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          <FilterChip href={withCity("/lekarstva", city)} active={!onlyRx}>
-            Все
-          </FilterChip>
-          <FilterChip
-            href={withCity("/lekarstva?rx=1", city)}
-            active={onlyRx}
-          >
-            Только по рецепту
-          </FilterChip>
-        </div>
+        <>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <FilterChip href={withCity("/lekarstva", city)} active={!onlyRx && !group}>
+              Все
+            </FilterChip>
+            <FilterChip href={withCity("/lekarstva?rx=1", city)} active={onlyRx}>
+              Только по рецепту
+            </FilterChip>
+          </div>
+
+          {/* Группы ATC — классификация ВОЗ, а не выдуманные нами рубрики.
+              Показываем только те, где действительно есть товары с ценой. */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {ATC_GROUPS.filter((gr) => (counts[gr.code] ?? 0) > 0).map((gr) => (
+              <FilterChip
+                key={gr.code}
+                href={withCity(`/lekarstva?g=${gr.code}`, city)}
+                active={group === gr.code}
+              >
+                {gr.name}{" "}
+                <span className="opacity-60">{counts[gr.code]}</span>
+              </FilterChip>
+            ))}
+          </div>
+        </>
       )}
 
       {items.length === 0 ? (
@@ -87,7 +118,7 @@ export default async function DrugsPage({
             <Link
               className="pressable rounded-lg border border-line px-4 py-2 text-sm"
               href={withCity(
-                `/lekarstva?page=${page - 1}${onlyRx ? "&rx=1" : ""}`,
+                `/lekarstva?page=${page - 1}${onlyRx ? "&rx=1" : ""}${group ? `&g=${group}` : ""}`,
                 city,
               )}
             >
@@ -97,7 +128,7 @@ export default async function DrugsPage({
           <Link
             className="pressable rounded-lg border border-line px-4 py-2 text-sm"
             href={withCity(
-              `/lekarstva?page=${page + 1}${onlyRx ? "&rx=1" : ""}`,
+              `/lekarstva?page=${page + 1}${onlyRx ? "&rx=1" : ""}${group ? `&g=${group}` : ""}`,
               city,
             )}
           >

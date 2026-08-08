@@ -233,6 +233,55 @@ export function getFreeCoverage(atc: string | null, inn: string | null): FreeDru
   }));
 }
 
+/**
+ * Группы ATC — первая буква кода. Это официальная анатомо-терапевтическая
+ * классификация ВОЗ, а не придуманные нами рубрики: «противомикробные» здесь
+ * значит ровно то же, что в любой аптеке и в любом протоколе лечения.
+ *
+ * Названия сокращены до читаемых: полные формулировки классификатора
+ * («Противомикробные препараты для системного применения») в чипсах фильтра
+ * не помещаются и мешают выбирать.
+ */
+export const ATC_GROUPS: { code: string; name: string }[] = [
+  { code: "J", name: "Противомикробные" },
+  { code: "C", name: "Сердце и сосуды" },
+  { code: "M", name: "Опорно-двигательная" },
+  { code: "A", name: "ЖКТ и обмен веществ" },
+  { code: "R", name: "Дыхательная система" },
+  { code: "N", name: "Нервная система" },
+  { code: "D", name: "Кожа" },
+  { code: "B", name: "Кровь" },
+  { code: "G", name: "Мочеполовая система" },
+  { code: "H", name: "Гормоны" },
+  { code: "S", name: "Глаза и уши" },
+  { code: "P", name: "Противопаразитарные" },
+  { code: "L", name: "Онкология и иммунитет" },
+  { code: "V", name: "Прочие" },
+];
+
+export function atcGroupCounts(): Record<string, number> {
+  const rows = db()
+    .prepare(
+      `SELECT SUBSTR(r.atc, 1, 1) AS g, COUNT(*) AS n
+       FROM drug_offer o JOIN drug_ref r ON r.id = o.drug_ref_id
+       WHERE r.atc IS NOT NULL AND o.price_kzt > 0
+       GROUP BY g`,
+    )
+    .all() as { g: string; n: number }[];
+  return Object.fromEntries(rows.map((r) => [r.g, r.n]));
+}
+
+export function listByAtcGroup(group: string, limit = 48, offset = 0): DrugListItem[] {
+  const rows = db()
+    .prepare(
+      `${LIST_SELECT}
+       WHERE o.price_kzt > 0 AND SUBSTR(r.atc, 1, 1) = ?
+       ORDER BY o.price_kzt ASC LIMIT ? OFFSET ?`,
+    )
+    .all(group, limit, offset) as Raw[];
+  return rows.map(shape);
+}
+
 export function drugTotals(): { offers: number; refs: number; free: number; withCap: number } {
   const one = (sql: string) => (db().prepare(sql).get() as { n: number }).n;
   return {
