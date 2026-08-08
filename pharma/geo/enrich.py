@@ -161,7 +161,7 @@ def enrich_pharmacies(keys: list[str], cities: list[str], *, pages: int = 5) -> 
     init_db()
     cli = TwoGisClient(keys)
     session = get_session()
-    added = 0
+    added = skipped = 0
     for city in cities:
         got = 0
         for page in range(1, pages + 1):
@@ -176,6 +176,9 @@ def enrich_pharmacies(keys: list[str], cities: list[str], *, pages: int = 5) -> 
             if not places:
                 break
             for p in places:
+                if not p.is_pharmacy:
+                    skipped += 1
+                    continue
                 session.merge(PlaceGeo(
                     place_id=f"ph2gis_{p.twogis_id}", kind="pharmacy", city=city_slug(city),
                     twogis_id=p.twogis_id, twogis_url=firm_url(p.twogis_id, city),
@@ -185,7 +188,7 @@ def enrich_pharmacies(keys: list[str], cities: list[str], *, pages: int = 5) -> 
                 got += 1
             session.commit()
         added += got
-        print(f"  [2gis] {city}: аптек получено {got}")
+        print(f"  [2gis] {city}: аптек {got}, отсеяно не-аптек {skipped}")
     session.close()
     print(f"  [2gis] квота: {cli.pool.report()}")
     return {"pharmacies": added}

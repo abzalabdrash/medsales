@@ -28,6 +28,18 @@ function HeaderInner() {
         >
           {t.clinicsNav}
         </Link>
+        <Link
+          href={withCity("/lekarstva", city)}
+          className="hidden shrink-0 text-sm font-medium text-muted transition-colors hover:text-ink sm:block"
+        >
+          Лекарства
+        </Link>
+        <Link
+          href={withCity("/apteki", city)}
+          className="hidden shrink-0 text-sm font-medium text-muted transition-colors hover:text-ink lg:block"
+        >
+          Аптеки
+        </Link>
         {showSearch ? (
           <div className="hidden min-w-0 flex-1 sm:block">
             <SearchBox city={city} variant="compact" />

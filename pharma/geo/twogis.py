@@ -142,6 +142,20 @@ class Place:
     working_hours: str | None
     is_24h: bool | None
     city: str
+    rubrics: tuple[str, ...] = ()
+
+    @property
+    def is_pharmacy(self) -> bool:
+        """Аптека ли это на самом деле — по ОСНОВНОЙ рубрике, а не по любой.
+
+        Рубричный поиск «аптека» возвращает и клиники с аптечным пунктом
+        внутри. Проверка «аптека есть где-то в списке рубрик» их не отсеивает:
+        у «Mediterra, институт хирургии» рубрика «Аптеки» стоит семнадцатой
+        после «Хирург», «Гинеколог» и прочих, а у настоящей аптеки она первая.
+        Первая рубрика — это то, чем организация является, остальные — что
+        она попутно умеет.
+        """
+        return bool(self.rubrics) and "аптек" in self.rubrics[0].lower()
 
     @property
     def url(self) -> str:
@@ -221,6 +235,7 @@ class TwoGisClient:
                 is_24h=bool(sched.get("Everyday", {}).get("working_hours", [{}])[0]
                             .get("from") == "00:00") if sched else None,
                 city=city,
+                rubrics=tuple(r.get("name", "") for r in (it.get("rubrics") or [])),
             ))
         return out
 

@@ -14,11 +14,60 @@ export type MapPoint = {
   lng: number;
   price?: number;
   address?: string | null;
+  rating?: number | null;
+  reviews?: number | null;
+  // id организации в 2GIS: с ним «Как добраться» ведёт на карточку филиала,
+  // а на телефоне открывает приложение с уже построенным маршрутом
+  twogisId?: string | null;
+  city?: string | null;
 };
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) =>
     c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&quot;",
+  );
+}
+
+/**
+ * Карточка в попапе маркера.
+ *
+ * Главное отличие от обычной подписи на карте — действие. Человеку, который
+ * увидел цену, нужно туда дойти, поэтому «Как добраться» ведёт прямо в 2GIS:
+ * на телефоне открывается приложение с построенным маршрутом, на десктопе —
+ * карточка филиала. Ссылка строится по id организации, а если его нет —
+ * по координатам, чтобы кнопка работала всегда.
+ */
+function popupHtml(p: MapPoint): string {
+  const city = p.city || "almaty";
+  const route = p.twogisId
+    ? `https://2gis.kz/${city}/firm/${p.twogisId}`
+    : `https://2gis.kz/${city}/geo/${p.lng},${p.lat}`;
+
+  const price =
+    p.price != null
+      ? `<div style="font-size:20px;font-weight:700;margin-top:6px">${tenge(p.price)}</div>`
+      : "";
+  const addr = p.address
+    ? `<div style="color:#666;margin-top:2px">${escapeHtml(p.address)}</div>`
+    : "";
+  const rating =
+    p.rating != null
+      ? `<div style="color:#666;margin-top:4px">★ ${p.rating.toFixed(1).replace(".", ",")}${
+          p.reviews ? ` · ${p.reviews.toLocaleString("ru-RU")} отзывов` : ""
+        }</div>`
+      : "";
+
+  return (
+    `<div style="min-width:190px">` +
+    `<div style="font-weight:600;font-size:14px">${escapeHtml(p.label)}</div>` +
+    addr +
+    rating +
+    price +
+    `<a href="${route}" target="_blank" rel="noopener noreferrer" ` +
+    `style="display:block;margin-top:10px;padding:8px 12px;border-radius:999px;` +
+    `background:var(--color-brand);color:#fff;text-align:center;` +
+    `font-weight:600;text-decoration:none">Как добраться</a>` +
+    `</div>`
   );
 }
 
@@ -109,9 +158,7 @@ export default function MapView({
         riseOnHover: true,
         zIndexOffset: p.price != null ? -Math.round(p.price / 100) : 0,
       });
-      const priceLine = p.price != null ? `<br>${tenge(p.price)}` : "";
-      const addrLine = p.address ? `<br>${escapeHtml(p.address)}` : "";
-      m.bindPopup(`<b>${escapeHtml(p.label)}</b>${addrLine}${priceLine}`);
+      m.bindPopup(popupHtml(p));
       cluster.addLayer(m);
       markersRef.current[p.id] = m;
       bounds.push([p.lat, p.lng]);

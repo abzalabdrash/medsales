@@ -61,7 +61,15 @@ def _city_case(col: str) -> str:
 def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
     if not PHARMA_DB.exists():
         raise FileNotFoundError(f"нет {PHARMA_DB} — сначала запустите ingest_ref")
-    out.unlink(missing_ok=True)
+    try:
+        out.unlink(missing_ok=True)
+    except PermissionError as exc:
+        # Windows не даёт удалить файл, пока его кто-то держит открытым.
+        # Обычно это запущенный dev-сервер: он открывает базу на чтение.
+        raise RuntimeError(
+            f"{out} занята другим процессом. Остановите dev-сервер "
+            f"(npm run dev) и повторите — сборка перезаписывает файл целиком."
+        ) from exc
 
     con = sqlite3.connect(out)
     stats: dict[str, int] = {}
