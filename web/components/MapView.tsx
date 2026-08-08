@@ -106,6 +106,11 @@ export default function MapView({
     const center: [number, number] = valid.length
       ? [valid[0].lat, valid[0].lng]
       : [43.238, 76.945];
+    // Зум колесом выключен до первого клика по карте. Если включить сразу,
+    // карта перехватывает прокрутку страницы: человек листает список аптек,
+    // курсор проходит над картой — и страница застревает, а карта улетает в
+    // космос. После клика карта «активна» и колесо зумит; курсор ушёл —
+    // прокрутка снова принадлежит странице.
     const map = L.map(ref.current, { scrollWheelZoom: false }).setView(
       center,
       12,
@@ -164,6 +169,8 @@ export default function MapView({
       bounds.push([p.lat, p.lng]);
     }
     map.addLayer(cluster);
+    map.on("click", () => map.scrollWheelZoom.enable());
+    map.on("mouseout", () => map.scrollWheelZoom.disable());
     if (bounds.length > 1)
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
 

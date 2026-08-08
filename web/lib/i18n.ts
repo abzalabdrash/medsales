@@ -204,6 +204,7 @@ export type Dict = {
   metaTitle: string;
   metaDescription: string;
   searchPlaceholder: string;
+  searchPlaceholderShort: string;
   searchAria: string;
   clear: string;
   popular: string;
@@ -363,6 +364,7 @@ const DICT: Record<Locale, Dict> = {
     metaDescription:
       "Найдите анализ, приём врача или диагностику и сравните цены в клиниках вашего города.",
     searchPlaceholder: "Найдите анализ, приём врача или услугу",
+    searchPlaceholderShort: "Поиск услуги",
     searchAria: "Поиск медуслуги",
     clear: "Очистить",
     popular: "Популярные услуги",
@@ -522,6 +524,7 @@ const DICT: Record<Locale, Dict> = {
     metaDescription:
       "Талдау, дәрігер қабылдауын немесе диагностиканы тауып, қалаңыздағы клиникалардың бағаларын салыстырыңыз.",
     searchPlaceholder: "Талдау, дәрігер қабылдауын немесе қызметті табыңыз",
+    searchPlaceholderShort: "Қызметті іздеу",
     searchAria: "Медқызметті іздеу",
     clear: "Тазалау",
     popular: "Танымал қызметтер",

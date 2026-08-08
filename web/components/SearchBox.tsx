@@ -120,7 +120,9 @@ export function SearchBox({
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKey}
-          placeholder={t.searchPlaceholder}
+          // В шапке поле узкое, и длинная подсказка обрывается на полуслове
+          // («…приём врача ил»). Короткий вариант помещается целиком.
+          placeholder={hero ? t.searchPlaceholder : t.searchPlaceholderShort}
           aria-label={t.searchAria}
           role="combobox"
           aria-expanded={open}
@@ -148,8 +150,12 @@ export function SearchBox({
 
       {open && (
         <>
+          {/* Ловит клик мимо подсказок, чтобы закрыть их. Раньше слой ещё и
+              затемнял страницу — при каждом клике в поиск всё уходило в тень,
+              хотя пользователь просто собирался печатать. Прозрачный слой
+              делает ровно то, что нужно, и ничего сверх того. */}
           <div
-            className="fixed inset-0 z-30 bg-ink/15"
+            className="fixed inset-0 z-30"
             onClick={() => setOpen(false)}
             aria-hidden
           />
