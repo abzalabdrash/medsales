@@ -7,6 +7,8 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CourseCalculator } from "@/components/CourseCalculator";
 import { getAnalogs, getDrug, getFreeCoverage } from "@/lib/drugs";
 import { tenge } from "@/lib/format";
+import { PharmacyCard } from "@/components/PharmacyCard";
+import { pharmaciesForChain } from "@/lib/pharmacies";
 import { withCity } from "@/lib/url";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +28,7 @@ export default async function DrugPage({
 
   const analogs = getAnalogs(drug.atc, drug.refId);
   const free = getFreeCoverage(drug.atc, drug.inn);
+  const branches = pharmaciesForChain(drug.chain, city);
   const cheaper = analogs.filter(
     (a) => a.price !== null && drug.price !== null && a.price < drug.price,
   );
@@ -162,6 +165,24 @@ export default async function DrugPage({
           price={drug.price}
         />
       </div>
+
+      {branches.length > 0 && (
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold">
+            Где купить — {branches.length} аптек сети «{drug.chain}»
+          </h2>
+          <p className="mt-1 text-sm text-muted">
+            Цена одна на всю сеть. Наличие в конкретной аптеке уточняйте по
+            телефону — нажмите на адрес, откроется карточка в 2GIS.
+          </p>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {branches.map((p) => (
+              <PharmacyCard key={p.id} p={p} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {analogs.length > 0 && (
         <section className="mt-10">

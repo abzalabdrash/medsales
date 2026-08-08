@@ -38,6 +38,18 @@ CITY_SLUG = {
 }
 
 
+def _has_column(con: sqlite3.Connection, table: str, col: str) -> bool:
+    """Добавляет колонку, если её нет. Возвращает True, когда она доступна."""
+    have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+    if col in have:
+        return True
+    try:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+        return True
+    except sqlite3.OperationalError:
+        return False
+
+
 def _copy_tables(con: sqlite3.Connection, alias: str, tables: list[str]) -> dict[str, int]:
     done: dict[str, int] = {}
     for t in tables:
@@ -131,6 +143,24 @@ def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
         """)
         stats["pharmacy"] = con.execute("SELECT COUNT(*) FROM pharmacy").fetchone()[0]
 
+    # --- сеть на витрине -> сеть на карте --------------------------------
+    # Цены мы знаем на уровне СЕТИ, а физические точки — из 2GIS, и пишутся
+    # они там как попало: «БИОСФЕРА», «Биосфера», «Europharma». Без сведения
+    # к одному ключу страница аптек остаётся украшением: рейтинг посмотреть
+    # можно, а узнать, где купить препарат и почём — нельзя.
+    con.execute("""
+        UPDATE pharmacy SET chain_key = CASE
+            WHEN LOWER(chain) LIKE '%биосфер%' OR LOWER(chain) LIKE '%biosfer%' THEN 'Биосфера'
+            WHEN LOWER(chain) LIKE '%еврофарм%' OR LOWER(chain) LIKE '%europharm%' THEN 'Еврофарма'
+            WHEN LOWER(chain) LIKE '%зерде%'   OR LOWER(chain) LIKE '%zerde%'   THEN 'Зерде'
+            WHEN LOWER(chain) LIKE '%садыхан%' OR LOWER(chain) LIKE '%sadykhan%' THEN 'Садыхан'
+            WHEN LOWER(chain) LIKE '%рауза%'   OR LOWER(chain) LIKE '%rauza%'   THEN 'Рауза'
+            ELSE chain END
+    """) if _has_column(con, "pharmacy", "chain_key") else None
+    stats["pharmacy_linked"] = con.execute(
+        "SELECT COUNT(*) FROM pharmacy WHERE chain_key IN "
+        "(SELECT DISTINCT chain FROM drug_offer)").fetchone()[0]
+
     # --- индексы: без них джойн препаратов к предложениям ползёт ---------
     for stmt in [
         "CREATE INDEX IF NOT EXISTS ix_offer_ref   ON drug_offer(drug_ref_id)",
@@ -167,7 +197,7 @@ def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
     """ if has_branch else ""
 
     pharmacy_part = f"""
-        SELECT 'pharmacy' AS kind, p.id AS place_id, p.chain AS org_name,
+        SELECT 'pharmacy' AS kind, p.id AS place_id, COALESCE(p.chain_key, p.chain) AS org_name,
                COALESCE(p.name, p.chain) AS place_name, p.city, p.address, p.lat, p.lng,
                p.rating, p.reviews_count, p.working_hours, p.phone,
                p.twogis_id, p.has_compounding,

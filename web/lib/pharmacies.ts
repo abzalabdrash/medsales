@@ -49,6 +49,34 @@ export function listPharmacies(city: string, limit = 60): PharmacyItem[] {
   return rows.map(shape);
 }
 
+/**
+ * Физические точки сети, где действует эта цена.
+ *
+ * Цену аптечные сети публикуют одну на всю сеть — по филиалам она не
+ * различается. Поэтому «где купить» — это не разные цены в разных аптеках,
+ * а один и тот же ценник в конкретных адресах. Без этой связки страница
+ * аптек была украшением: рейтинг виден, а есть ли там нужный препарат —
+ * нет.
+ */
+export function pharmaciesForChain(
+  chain: string,
+  city: string,
+  limit = 8,
+): PharmacyItem[] {
+  const rows = db()
+    .prepare(
+      `SELECT id, chain, name, city, address, lat, lng,
+              rating, reviews_count AS reviews, twogis_id AS twogisId,
+              has_compounding AS hasCompounding
+       FROM pharmacy
+       WHERE COALESCE(chain_key, chain) = ?
+       ORDER BY (city <> ?), (rating IS NULL), rating DESC
+       LIMIT ?`,
+    )
+    .all(chain, city, limit) as Raw[];
+  return rows.map(shape);
+}
+
 export function pharmacyCities(): { city: string; n: number }[] {
   return db()
     .prepare(
