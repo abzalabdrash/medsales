@@ -1,19 +1,22 @@
 """Загрузка предложений аптек в БД + матчинг к эталонному справочнику."""
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
+from dataclasses import asdict
+from pathlib import Path
 
 from rapidfuzz import fuzz, process
 
 from .db import det_id, get_session, init_db, norm_name
-from .forms import parse_form
 from .models import DrugOffer, DrugRef
 from .sources import europharma
 
+RAW_PATH = Path(__file__).resolve().parent.parent / "data" / "raw_offers_europharma.json"
+
 # «Нимесулид 100 мг № 20 табл» -> дозировка и упаковка живут прямо в названии
 _PACK_IN_NAME = re.compile(r"[№N]\s*(\d+)", re.IGNORECASE)
-_DOSE_IN_NAME = re.compile(r"(\d+(?:[.,]\d+)?)\s*(мкг|мг|г|мл|МЕ|ЕД|%)", re.IGNORECASE)
 
 
 def _brand_key(name: str) -> str:
@@ -38,14 +41,16 @@ def match_offers(session, offers, *, threshold: int = 88) -> Counter:
     stats = Counter()
     for o in offers:
         stats["total"] += 1
-        key = _brand_key(o.name)
+        # сюда приходят ORM-объекты DrugOffer, у них поле name_raw, а не name
+        name = o.name_raw
+        key = _brand_key(name)
         bucket = by_key.get(key) or []
         if not bucket:
             stats["no_bucket"] += 1
             o.drug_ref_id = None
             continue
 
-        target = norm_name(o.name)
+        target = norm_name(name)
         best = process.extractOne(
             target, [norm_name(r.tn) for r in bucket], scorer=fuzz.token_set_ratio)
         if not best or best[1] < threshold:
@@ -55,7 +60,7 @@ def match_offers(session, offers, *, threshold: int = 88) -> Counter:
 
         cand = bucket[best[2]]
         # --- сверка упаковки: защита от «то же название, другая фасовка» ---
-        pm = _PACK_IN_NAME.search(o.name)
+        pm = _PACK_IN_NAME.search(name)
         offer_pack = int(pm.group(1)) if pm else None
         if offer_pack and cand.pack_size and offer_pack != cand.pack_size:
             same_pack = [r for r in bucket if r.pack_size == offer_pack]
@@ -73,11 +78,35 @@ def match_offers(session, offers, *, threshold: int = 88) -> Counter:
     return stats
 
 
-def run(max_categories: int | None = None, max_pages: int = 200) -> dict:
+def _dump_raw(raw: list) -> None:
+    """Сырые предложения на диск СРАЗУ после обхода.
+
+    Обход сети занимает ~40 минут. Любая ошибка на следующем шаге (матчинг,
+    запись в БД) не должна стоить этих сорока минут — поэтому сначала дамп,
+    потом всё остальное.
+    """
+    RAW_PATH.parent.mkdir(parents=True, exist_ok=True)
+    RAW_PATH.write_text(
+        json.dumps([asdict(o) for o in raw], ensure_ascii=False), encoding="utf-8")
+    print(f"  [ingest] сырые данные сохранены: {RAW_PATH}")
+
+
+def _load_raw() -> list:
+    data = json.loads(RAW_PATH.read_text(encoding="utf-8"))
+    return [europharma.Offer(**d) for d in data]
+
+
+def run(max_categories: int | None = None, max_pages: int = 200,
+        from_cache: bool = False) -> dict:
     init_db()
     session = get_session()
 
-    raw = europharma.scrape(max_categories=max_categories, max_pages=max_pages)
+    if from_cache and RAW_PATH.exists():
+        raw = _load_raw()
+        print(f"  [ingest] загружено из кэша: {len(raw)} предложений (сеть не трогаем)")
+    else:
+        raw = europharma.scrape(max_categories=max_categories, max_pages=max_pages)
+        _dump_raw(raw)
     print(f"\n  [ingest] собрано предложений: {len(raw)}")
 
     session.query(DrugOffer).filter(DrugOffer.source == "europharma").delete()
@@ -111,6 +140,11 @@ def run(max_categories: int | None = None, max_pages: int = 200) -> dict:
 
 
 if __name__ == "__main__":
-    import sys
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else None
-    run(max_categories=n)
+    import argparse
+    ap = argparse.ArgumentParser(description="Сбор и загрузка предложений аптек")
+    ap.add_argument("--categories", type=int, default=None,
+                    help="ограничить число категорий (для быстрой проверки)")
+    ap.add_argument("--from-cache", action="store_true",
+                    help="взять прошлый обход из raw_offers_*.json, не ходя в сеть")
+    a = ap.parse_args()
+    run(max_categories=a.categories, from_cache=a.from_cache)

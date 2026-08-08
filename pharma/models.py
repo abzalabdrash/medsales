@@ -53,6 +53,14 @@ class DrugRef(Base):
     price_cap_producer: Mapped[float | None] = mapped_column(Float)
     price_cap_wholesale: Mapped[float | None] = mapped_column(Float)
     price_cap_retail: Mapped[float | None] = mapped_column(Float)     # ★ эталон переплаты
+    # из какого приказа взят потолок — без этого нельзя судить, актуален ли он
+    price_cap_source: Mapped[str | None] = mapped_column(String(32))
+    # Максимальный потолок среди ВСЕХ производителей той же позиции
+    # (одинаковые МНН + форма + фасовка). Именно с ним нужно сравнивать цену
+    # на полке: матчинг по названию не знает производителя, а у разных
+    # заводов потолки отличаются в разы. Сравнение с минимальным потолком
+    # обвиняло бы аптеку в переплате там, где её нет.
+    price_cap_group_max: Mapped[float | None] = mapped_column(Float)
 
     is_rx: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     is_supplement: Mapped[bool] = mapped_column(Boolean, default=False)  # БАД (нет в реестре ЛС)

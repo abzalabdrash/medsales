@@ -15,6 +15,17 @@ from .models import DrugRef
 from .sources import adilet
 
 
+# Приоритет приказов по свежести. Предельные цены нельзя смешивать между
+# редакциями: в приказе 2019 года ацетилсалициловая кислота стоит 29 ₸, и
+# сравнение полки 2026 года с этим потолком даёт фиктивную «переплату 900%».
+# Берём цену из САМОГО СВЕЖЕГО приказа, где она есть, а не минимальную.
+DOC_RANK = {
+    "V2100024229": 3,   # действующий, произв./опт/розница
+    "V2100023886": 2,   # действующий, ГОБМП/ОСМС
+    "V1900019037": 1,   # редакция 2019 года — только как запасной вариант
+}
+
+
 def _score(r: adilet.AdiletRow) -> int:
     return sum(bool(x) for x in (r.inn, r.form_raw, r.manufacturer, r.reg_number,
                                  r.price_producer, r.price_wholesale, r.price_retail))
@@ -26,11 +37,12 @@ def build() -> dict:
 
     # --- дедуп -----------------------------------------------------------
     best: dict[tuple, adilet.AdiletRow] = {}
-    retail_seen: dict[tuple, list[float]] = {}
+    retail_seen: dict[tuple, list[tuple[int, float, str]]] = {}
     for r in rows:
         key = (r.reg_number or r.tn, r.form_raw or "")
         if r.price_retail:
-            retail_seen.setdefault(key, []).append(r.price_retail)
+            retail_seen.setdefault(key, []).append(
+                (DOC_RANK.get(r.source_doc, 0), r.price_retail, r.source_doc))
         cur = best.get(key)
         if cur is None or _score(r) > _score(cur):
             best[key] = r
@@ -42,7 +54,9 @@ def build() -> dict:
     for key, r in best.items():
         pf = parse_form(r.form_raw)
         retails = retail_seen.get(key) or []
-        retail = min(retails) if retails else None
+        # сначала по свежести приказа, при равной свежести — меньшая цена
+        retail = min(retails, key=lambda t: (-t[0], t[1]))[1] if retails else None
+        cap_doc = min(retails, key=lambda t: (-t[0], t[1]))[2] if retails else None
 
         session.add(DrugRef(
             id=det_id("dr", r.reg_number, r.form_raw, r.tn),
@@ -55,10 +69,12 @@ def build() -> dict:
             manufacturer=r.manufacturer, reg_number=r.reg_number,
             price_cap_producer=r.price_producer,
             price_cap_wholesale=r.price_wholesale,
-            price_cap_retail=retail,
+            price_cap_retail=retail, price_cap_source=cap_doc,
             source="adilet:" + r.source_doc, source_url=r.source_url,
         ))
         stats["total"] += 1
+        if cap_doc:
+            stats[f"cap_from_{cap_doc}"] += 1
         stats["with_inn"] += bool(r.inn)
         stats["with_form"] += bool(pf.form)
         stats["with_strength"] += pf.strength is not None
@@ -67,6 +83,22 @@ def build() -> dict:
         stats["divisible"] += pf.is_divisible
 
     session.commit()
+
+    # --- групповой потолок ------------------------------------------------
+    # Группа = одно и то же вещество, форма и фасовка у разных производителей.
+    # Ключ по МНН, а если его нет — по первому слову торгового наименования.
+    groups: dict[tuple, float] = {}
+    refs = session.query(DrugRef).filter(DrugRef.price_cap_retail.isnot(None)).all()
+    for r in refs:
+        key = (r.inn_norm or r.tn_norm.split(" ")[0], r.form, r.pack_size)
+        groups[key] = max(groups.get(key, 0.0), r.price_cap_retail)
+    for r in session.query(DrugRef).all():
+        key = (r.inn_norm or r.tn_norm.split(" ")[0], r.form, r.pack_size)
+        r.price_cap_group_max = groups.get(key) or r.price_cap_retail
+    session.commit()
+
+    stats["with_group_cap"] = sum(
+        1 for r in session.query(DrugRef).all() if r.price_cap_group_max)
     session.close()
     return dict(stats)
 
