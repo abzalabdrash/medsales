@@ -204,6 +204,10 @@ export function OffersView({
           lat: l.lat as number,
           lng: l.lng as number,
           address: l.address,
+          rating: l.rating,
+          reviews: l.reviews,
+          twogisId: l.twogisId,
+          city: l.city,
         })),
     [visible, locByBrand],
   );

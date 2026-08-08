@@ -294,6 +294,11 @@ export type ServiceLocation = {
   onlineBooking: boolean;
   durationDays: number | null;
   rating: number | null; // branch rating /5
+  reviews: number | null;
+  // id организации в 2GIS — с ним «Как добраться» ведёт на карточку филиала,
+  // а не на голую точку по координатам
+  twogisId: string | null;
+  city: string | null;
 };
 
 // Branch-level rows for a service in a city (powers the map + route/call buttons).
@@ -308,6 +313,7 @@ export function getServiceLocations(
            br.address address, br.phone phone, br.lat lat, br.lng lng,
            br.source_url sourceUrl, br.source source,
            br.working_hours workingHours, br.rating rating,
+           br.reviews_count reviews, br.twogis_id twogisId, br.city city,
            COALESCE(br.online_booking, 0) onlineBooking,
            MIN(p.price_kzt) price, MAX(p.parsed_at) parsedAt,
            MAX(p.duration_days) durationDays
