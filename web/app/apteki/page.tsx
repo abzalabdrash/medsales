@@ -37,7 +37,7 @@ export default async function PharmaciesPage({
 
       {!has && (
         <p className="mt-4 rounded-lg border border-line bg-surface px-4 py-3 text-sm text-muted">
-          По городу {CITIES.find((c) => c.slug === city)?.ru ?? city} аптеки ещё
+          По городу {CITIES.find((c) => c.slug === city)?.name ?? city} аптеки ещё
           не собраны — показываем все города. Доступны:{" "}
           {available.map((c, i) => (
             <span key={c.city}>
@@ -46,7 +46,7 @@ export default async function PharmaciesPage({
                 href={withCity("/apteki", c.city)}
                 className="text-brand-ink hover:underline"
               >
-                {CITIES.find((x) => x.slug === c.city)?.ru ?? c.city}
+                {CITIES.find((x) => x.slug === c.city)?.name ?? c.city}
               </Link>{" "}
               ({c.n})
             </span>

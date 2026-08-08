@@ -5,12 +5,13 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Star, Stethoscope, Building2, Bell, X } from "lucide-react";
 import { resolveCity } from "@/lib/cities";
-import { categoryLabel, cityNameL } from "@/lib/i18n";
+import { cityNameL } from "@/lib/i18n";
 import { withCity } from "@/lib/url";
 import {
   useProfile,
   removeFavorite,
   removeWatch,
+  favKey,
 } from "@/lib/profile";
 import { useI18n } from "@/components/I18nProvider";
 import { AddressPicker } from "@/components/AddressPicker";
@@ -20,7 +21,10 @@ function FavoritesInner() {
   const city = resolveCity(useSearchParams().get("city"));
   const { favorites, watches } = useProfile();
 
-  const services = favorites.filter((f) => f.kind === "service");
+  // Избранное хранится как "услуга В КЛИНИКЕ" (kind: "offer"), а не просто
+  // услуга: цена привязана к филиалу, и без клиники запись бессмысленна.
+  // Страница была написана под старую форму типов и с тех пор не собиралась.
+  const offers = favorites.filter((f) => f.kind === "offer");
   const clinics = favorites.filter((f) => f.kind === "clinic");
   const empty = favorites.length === 0 && watches.length === 0;
 
@@ -41,34 +45,34 @@ function FavoritesInner() {
         </p>
       ) : (
         <div className="mt-6 flex flex-col gap-6">
-          {services.length > 0 && (
+          {offers.length > 0 && (
             <section>
               <h2 className="mb-2 flex items-center gap-1.5 text-lg font-semibold">
                 <Stethoscope size={18} aria-hidden /> {t.favServicesHead}
               </h2>
               <div className="overflow-hidden rounded-2xl border border-line">
-                {services.map((f, i) =>
-                  f.kind === "service" ? (
+                {offers.map((f, i) =>
+                  f.kind === "offer" ? (
                     <div
-                      key={f.id}
+                      key={favKey(f)}
                       className={`flex items-center gap-2 bg-surface ${
                         i > 0 ? "border-t border-line" : ""
                       }`}
                     >
                       <Link
-                        href={withCity(`/usluga/${f.id}`, city)}
+                        href={withCity(`/usluga/${f.serviceId}`, f.city)}
                         className="flex min-h-[56px] flex-1 items-center justify-between gap-3 px-4 py-3 hover:bg-surface-2"
                       >
                         <span className="min-w-0 truncate font-medium">
-                          {f.name}
+                          {f.serviceName}
                         </span>
                         <span className="shrink-0 text-sm text-muted">
-                          {categoryLabel(locale, f.category)}
+                          {f.clinicName}
                         </span>
                       </Link>
                       <button
                         type="button"
-                        onClick={() => removeFavorite("service", f.id)}
+                        onClick={() => removeFavorite(favKey(f))}
                         aria-label={t.removeFromFav}
                         className="pressable mr-2 grid h-10 w-10 place-items-center rounded-lg text-muted hover:bg-surface-2"
                       >
@@ -108,7 +112,7 @@ function FavoritesInner() {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => removeFavorite("clinic", f.id)}
+                        onClick={() => removeFavorite(favKey(f))}
                         aria-label={t.removeFromFav}
                         className="pressable mr-2 grid h-10 w-10 place-items-center rounded-lg text-muted hover:bg-surface-2"
                       >
@@ -129,28 +133,25 @@ function FavoritesInner() {
               <div className="overflow-hidden rounded-2xl border border-line">
                 {watches.map((w, i) => (
                   <div
-                    key={`${w.kind}:${w.id}`}
+                    key={`${w.clinicId}:${w.serviceId}`}
                     className={`flex items-center gap-2 bg-surface ${
                       i > 0 ? "border-t border-line" : ""
                     }`}
                   >
                     <Link
-                      href={withCity(
-                        `/${w.kind === "service" ? "usluga" : "klinika"}/${w.id}`,
-                        w.city,
-                      )}
+                      href={withCity(`/usluga/${w.serviceId}`, w.city)}
                       className="flex min-h-[56px] flex-1 items-center justify-between gap-3 px-4 py-3 hover:bg-surface-2"
                     >
                       <span className="min-w-0 truncate font-medium">
-                        {w.label}
+                        {w.serviceName}
                       </span>
-                      <span className="shrink-0 text-sm tabular-nums text-muted">
-                        {w.phone}
+                      <span className="shrink-0 text-sm text-muted">
+                        {w.clinicName}
                       </span>
                     </Link>
                     <button
                       type="button"
-                      onClick={() => removeWatch(w.kind, w.id)}
+                      onClick={() => removeWatch(w.clinicId, w.serviceId)}
                       aria-label={t.removeFromFav}
                       className="pressable mr-2 grid h-10 w-10 place-items-center rounded-lg text-muted hover:bg-surface-2"
                     >

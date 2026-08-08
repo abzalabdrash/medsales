@@ -146,7 +146,9 @@ export function listDrugs(opts: {
   offset?: number;
 }): DrugListItem[] {
   const where: string[] = ["o.price_kzt > 0"];
-  const args: unknown[] = [];
+  // node:sqlite принимает только примитивы — держим массив строго типизированным,
+  // иначе unknown[] не проходит проверку типов при раскрытии в .all()
+  const args: (string | number)[] = [];
   if (opts.onlyRx) where.push("o.is_rx = 1");
   if (opts.onlyMatched) where.push("o.drug_ref_id IS NOT NULL");
   if (opts.maxPrice) {
