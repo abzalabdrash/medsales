@@ -91,7 +91,11 @@ type Raw = Record<string, unknown>;
 
 function shape(x: Raw): DrugDetail {
   const price = (x.price as number) ?? null;
-  const cap = (x.priceCap as number) ?? null;
+  // Потолки в приказах даны с копейками (6984.26). Формат tenge() рассчитан
+  // на целые: он меняет запятую на пробел и превращает цену в «6 984 26».
+  // Копейки в предельной цене всё равно ничего не решают — округляем здесь.
+  const rawCap = (x.priceCap as number) ?? null;
+  const cap = rawCap === null ? null : Math.round(rawCap);
   const capSource = (x.capSource as string) ?? null;
   return {
     offerId: x.offerId as string,
@@ -187,9 +191,9 @@ export function getAnalogs(atc: string | null, excludeRefId: string | null, limi
     packSize: (x.packSize as number) ?? null,
     form: (x.form as string) ?? null,
     manufacturer: (x.manufacturer as string) ?? null,
-    priceCap: (x.priceCap as number) ?? null,
+    priceCap: x.priceCap == null ? null : Math.round(x.priceCap as number),
     offerId: (x.offerId as string) ?? null,
-    price: (x.price as number) ?? null,
+    price: x.price == null ? null : Math.round(x.price as number),
   }));
 }
 
@@ -233,6 +237,8 @@ export function drugTotals(): { offers: number; refs: number; free: number; with
     offers: one("SELECT COUNT(*) AS n FROM drug_offer WHERE price_kzt > 0"),
     refs: one("SELECT COUNT(*) AS n FROM drug_ref"),
     free: one("SELECT COUNT(*) AS n FROM free_drug"),
-    withCap: one("SELECT COUNT(*) AS n FROM drug_ref WHERE price_cap_group_max IS NOT NULL"),
+    // именно позиции с СОБСТВЕННЫМ потолком из приказа, а не унаследованным
+    // по группе — иначе цифра на витрине завышена и вводит в заблуждение
+    withCap: one("SELECT COUNT(*) AS n FROM drug_ref WHERE price_cap_retail IS NOT NULL"),
   };
 }
