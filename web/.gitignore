@@ -1,0 +1,10 @@
+/node_modules
+/.next
+/out
+/build
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+.env*
+# keep the database out of git; place it at ../data/medprice.db
+/data/*.db
