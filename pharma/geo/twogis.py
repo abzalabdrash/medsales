@@ -26,7 +26,10 @@ CATALOG = "https://catalog.api.2gis.com/3.0/items"
 CACHE = Path(__file__).resolve().parent.parent.parent / "data" / "cache" / "2gis"
 CACHE.mkdir(parents=True, exist_ok=True)
 
-# 2GIS требует латинский slug города в URL карточки
+# 2GIS требует латинский slug города в URL карточки.
+# В базе услуг города хранятся слагами ('almaty'), в базе препаратов —
+# по-русски. Функции ниже принимают любой вариант: ошибка здесь молча
+# уводит ссылку в другой город, а заметить это на карте почти невозможно.
 CITY_SLUG = {
     "Алматы": "almaty", "Астана": "astana", "Шымкент": "shymkent",
     "Караганда": "karaganda", "Актобе": "aktobe", "Тараз": "taraz",
@@ -34,6 +37,25 @@ CITY_SLUG = {
     "Актау": "aktau", "Кызылорда": "kyzylorda", "Петропавловск": "petropavlovsk",
     "Талдыкорган": "taldykorgan", "Семей": "semey", "Усть-Каменогорск": "ust-kamenogorsk",
 }
+SLUG_RU = {v: k for k, v in CITY_SLUG.items()}
+
+
+def city_slug(city: str | None) -> str:
+    """'Алматы' -> 'almaty', 'almaty' -> 'almaty'."""
+    if not city:
+        return "almaty"
+    c = city.strip()
+    if c in CITY_SLUG:
+        return CITY_SLUG[c]
+    return c.lower() if c.lower() in SLUG_RU else "almaty"
+
+
+def city_ru(city: str | None) -> str:
+    """Русское имя для поискового запроса: 2GIS ищет по нему заметно лучше."""
+    if not city:
+        return "Алматы"
+    c = city.strip()
+    return c if c in CITY_SLUG else SLUG_RU.get(c.lower(), c)
 
 
 # ==========================================================================
@@ -41,12 +63,12 @@ CITY_SLUG = {
 # ==========================================================================
 def firm_url(firm_id: str, city: str = "Алматы") -> str:
     """Веб-карточка организации. На телефоне сама предложит открыть приложение."""
-    return f"https://2gis.kz/{CITY_SLUG.get(city, 'almaty')}/firm/{firm_id}"
+    return f"https://2gis.kz/{city_slug(city)}/firm/{firm_id}"
 
 
 def firm_deeplink(firm_id: str, city: str = "Алматы") -> str:
     """Прямой запуск приложения 2GIS на карточке организации."""
-    return f"dgis://2gis.kz/{CITY_SLUG.get(city, 'almaty')}/firm/{firm_id}"
+    return f"dgis://2gis.kz/{city_slug(city)}/firm/{firm_id}"
 
 
 def route_deeplink(points: list[tuple[float, float]], mode: str = "pedestrian") -> str:
@@ -69,12 +91,20 @@ def route_deeplink(points: list[tuple[float, float]], mode: str = "pedestrian") 
 def route_web_url(points: list[tuple[float, float]], city: str = "Алматы") -> str:
     """Веб-версия маршрута — фолбэк для десктопа, где приложения нет."""
     pts = "|".join(f"{lng},{lat}" for lat, lng in points)
-    return f"https://2gis.kz/{CITY_SLUG.get(city, 'almaty')}/directions/points/{quote(pts)}"
+    return f"https://2gis.kz/{city_slug(city)}/directions/points/{quote(pts)}"
 
 
 # ==========================================================================
 #  Places API
 # ==========================================================================
+class QuotaOrAuthError(RuntimeError):
+    """Ключ невалиден или квота исчерпана — продолжать обход бессмысленно.
+
+    Отделена от обычного «ничего не найдено»: первое требует остановки,
+    второе — просто пропуска одной точки.
+    """
+
+
 class KeyPool:
     """Ротация ключей + подсчёт израсходованной квоты по каждому."""
 
@@ -137,27 +167,42 @@ class TwoGisClient:
         safe = "".join(c if c.isalnum() else "_" for c in f"{city}_{q}_{page}")[:120]
         return CACHE / f"{safe}.json"
 
-    def search(self, query: str, city: str, *, page: int = 1, page_size: int = 10) -> list[Place]:
-        cp = self._cache_path(query, city, page)
+    def search(self, query: str, city: str, *, page: int = 1, page_size: int = 10,
+               only_orgs: bool = True) -> list[Place]:
+        """only_orgs=True возвращает только организации.
+
+        Без этого фильтра 2GIS охотно отдаёт дома, улицы и микрорайоны: запрос
+        по клинике «Рахат» находит микрорайон Рахат, имя совпадает на 100%, и
+        в базу уезжает район города с чужим рейтингом. Фильтруем по типу.
+        """
+        cp = self._cache_path(f"{query}_{int(only_orgs)}", city, page)
         if self.use_cache and cp.exists():
             payload = json.loads(cp.read_text(encoding="utf-8"))
         else:
             params = {
-                "q": f"{query} {city}",
+                "q": f"{query} {city_ru(city)}",
                 "key": self.pool.take(),
                 "fields": FIELDS,
                 "page": page,
                 "page_size": page_size,
                 "locale": "ru_KZ",
             }
+            if only_orgs:
+                params["type"] = "branch"   # филиал организации, не дом и не район
             time.sleep(self.delay)
             r = self._cli.get(CATALOG, params=params)
             r.raise_for_status()
             payload = r.json()
             code = payload.get("meta", {}).get("code")
-            if code != 200:
-                raise RuntimeError(f"2GIS вернул code={code}: "
-                                   f"{payload.get('meta', {}).get('error', {})}")
+            # 404 — это «ничего не нашлось», нормальный ответ для организации,
+            # которой нет в справочнике. Кэшируем пустоту, чтобы не спрашивать
+            # повторно, и возвращаем пустой список вместо исключения: раньше
+            # одна ненайденная клиника обрывала обход всех остальных.
+            if code == 404:
+                payload = {"result": {"items": []}}
+            elif code != 200:
+                raise QuotaOrAuthError(
+                    f"2GIS вернул code={code}: {payload.get('meta', {}).get('error', {})}")
             cp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
         out: list[Place] = []

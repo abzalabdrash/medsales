@@ -153,6 +153,30 @@ class InnPriceCap(Base):
     source_url: Mapped[str | None] = mapped_column(String(512))
 
 
+class PlaceGeo(Base):
+    """Результат обогащения точки через 2GIS — отдельно от самих точек.
+
+    Живёт в pharma.db, а не в собранной medsales.db, потому что merge.py
+    пересоздаёт сводную базу из источников: если писать обогащение прямо в
+    branch, каждая пересборка стирала бы результат, за который заплачено
+    квотой ключа. Здесь оно переживает любое число пересборок, а merge
+    просто накладывает его поверх скопированных таблиц.
+    """
+    __tablename__ = "place_geo"
+    place_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)   # clinic | pharmacy
+    twogis_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    twogis_url: Mapped[str | None] = mapped_column(String(512))
+    name_2gis: Mapped[str | None] = mapped_column(String(255))
+    address: Mapped[str | None] = mapped_column(String(512))
+    lat: Mapped[float | None] = mapped_column(Float)
+    lng: Mapped[float | None] = mapped_column(Float)
+    rating: Mapped[float | None] = mapped_column(Float)
+    reviews_count: Mapped[int | None] = mapped_column(Integer)
+    match_score: Mapped[float | None] = mapped_column(Float)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class PriceAudit(Base):
     """Почему цена принята или отвергнута — для объяснимости и для защиты перед жюри."""
     __tablename__ = "price_audit"
