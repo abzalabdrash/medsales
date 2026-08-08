@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+
+# промежуточные базы и кэш — пересобираются командами из README
+data/pharma.db
+data/cache/
+data/adilet_raw.json
+data/*.log
