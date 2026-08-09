@@ -19,6 +19,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from .db import chain_key
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 OUT = DATA / "medsales.db"
@@ -27,7 +29,8 @@ DEFAULT_MEDPRICE = Path(r"C:\Users\abdra\Projects\med\data\medprice.db")
 
 SERVICE_TABLES = ["brand", "branch", "canonical_service", "price", "review", "price_snapshot"]
 PHARMA_TABLES = ["drug_ref", "drug_offer", "pharmacy", "free_drug",
-                 "inn_price_cap", "place_geo", "place_review"]
+                 "inn_price_cap", "place_geo", "place_review",
+                 "agg_product", "pharmacy_offer"]
 
 CITY_SLUG = {
     "Алматы": "almaty", "Астана": "astana", "Шымкент": "shymkent",
@@ -63,6 +66,85 @@ def _copy_tables(con: sqlite3.Connection, alias: str, tables: list[str]) -> dict
         con.execute(f"CREATE TABLE main.{t} AS SELECT * FROM {alias}.{t}")
         done[t] = con.execute(f"SELECT COUNT(*) FROM main.{t}").fetchone()[0]
     return done
+
+
+def _link_chains(con: sqlite3.Connection) -> int:
+    """Свести написания сетей к одному ключу — в Python, не в SQL.
+
+    Раньше это был CASE с LOWER(chain) LIKE '%биосфер%'. Встроенный LOWER()
+    в SQLite работает только с латиницей: LOWER('БИОСФЕРА') возвращает
+    'БИОСФЕРА', условие не срабатывало, и связывались лишь сети с латинским
+    написанием («Europharma»), а 25 точек «БИОСФЕРА» молча оставались без цен.
+    """
+    rows = con.execute("SELECT id, chain FROM pharmacy WHERE chain IS NOT NULL").fetchall()
+    updates = [(chain_key(chain), pid) for pid, chain in rows]
+    con.executemany("UPDATE pharmacy SET chain_key = ? WHERE id = ?", updates)
+    return len(updates)
+
+
+def _fix_agg_prices(con: sqlite3.Connection) -> tuple[int, int]:
+    """Пересчитать цены каталога по реальным строкам аптек, отбросив заглушки.
+
+    Привязка обязательно по ФАСОВКЕ, а не по товару целиком. Агрегатор отдаёт
+    список аптек только для одного варианта товара, и перенести его цену на
+    все фасовки значит соврать втрое: «Омепразол-Виста, 30 капсул, 271 тенге»,
+    где 271 это цена упаковки на 10. По такой цене агент посчитал бы и курс.
+
+    Фасовкам, для которых строк аптек нет, цену из витрины оставляем как есть.
+    Если там заглушка, цену обнуляем: пустое поле честнее выдуманного числа,
+    а настоящие цены по аптекам всё равно приходят отдельным инструментом.
+
+    Диапазон цены на витрине агрегатора приходит строкой вида «5 — 2 215 ₸».
+    Пятёрка тут не цена, а способ аптеки написать «уточняйте»: рядом лежит
+    «Диспорт за 1 тенге» при настоящей цене 72 тысячи. Показать такое в
+    карточке значит соврать в самом заметном месте.
+
+    Заглушки ловятся двумя ситами.
+
+    Абсолютный порог. В собранных данных ниже 15 тенге лежат 11 строк, между
+    15 и 30 нет ни одной, а самая дешёвая настоящая цена это Фурадонин за 40.
+    Провал в распределении и есть граница, поэтому 30 тенге режут ровно
+    заглушки и ничего больше.
+
+    Медиана. Заглушка бывает и крупнее порога: у препарата за 70 тысяч это
+    может быть тысяча. Одним общим порогом такое не поймать, препараты стоят
+    от сорока тенге до девятисот тысяч. Считаем в Python, потому что медиана
+    в SQL выходит нечитаемой.
+    """
+    from statistics import median
+
+    ABSOLUTE_FLOOR = 30.0
+
+    rows = con.execute("""
+        SELECT product_code, city, pack_size, price_kzt FROM pharmacy_offer
+        WHERE price_kzt IS NOT NULL AND price_kzt > 0
+    """).fetchall()
+    by_item: dict[tuple[str, str, int | None], list[float]] = {}
+    for code, city, pack, price in rows:
+        by_item.setdefault((code, city, pack), []).append(float(price))
+
+    updates = []
+    for (code, city, pack), prices in by_item.items():
+        kept = [p for p in prices if p >= ABSOLUTE_FLOOR]
+        if len(kept) >= 3:
+            floor = median(kept) * 0.15
+            kept = [p for p in kept if p >= floor] or kept
+        if not kept:
+            continue
+        updates.append((min(kept), max(kept), code, city, pack, pack))
+
+    # «pack IS ?» вместо «= ?»: у части позиций фасовка неизвестна, и NULL
+    # обычным сравнением не ловится
+    con.executemany(
+        "UPDATE agg_product SET price_min = ?, price_max = ? "
+        "WHERE code = ? AND city = ? AND (pack_size IS ? OR (? IS NULL AND pack_size IS NULL))",
+        updates)
+
+    # Фасовки без строк аптек: заглушку из витрины стираем
+    cleared = con.execute(
+        "UPDATE agg_product SET price_min = NULL WHERE price_min IS NOT NULL "
+        "AND price_min < ?", (ABSOLUTE_FLOOR,)).rowcount
+    return len(updates), cleared
 
 
 def _city_case(col: str) -> str:
@@ -148,15 +230,8 @@ def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
     # они там как попало: «БИОСФЕРА», «Биосфера», «Europharma». Без сведения
     # к одному ключу страница аптек остаётся украшением: рейтинг посмотреть
     # можно, а узнать, где купить препарат и почём — нельзя.
-    con.execute("""
-        UPDATE pharmacy SET chain_key = CASE
-            WHEN LOWER(chain) LIKE '%биосфер%' OR LOWER(chain) LIKE '%biosfer%' THEN 'Биосфера'
-            WHEN LOWER(chain) LIKE '%еврофарм%' OR LOWER(chain) LIKE '%europharm%' THEN 'Еврофарма'
-            WHEN LOWER(chain) LIKE '%зерде%'   OR LOWER(chain) LIKE '%zerde%'   THEN 'Зерде'
-            WHEN LOWER(chain) LIKE '%садыхан%' OR LOWER(chain) LIKE '%sadykhan%' THEN 'Садыхан'
-            WHEN LOWER(chain) LIKE '%рауза%'   OR LOWER(chain) LIKE '%rauza%'   THEN 'Рауза'
-            ELSE chain END
-    """) if _has_column(con, "pharmacy", "chain_key") else None
+    if _has_column(con, "pharmacy", "chain_key"):
+        _link_chains(con)
     stats["pharmacy_linked"] = con.execute(
         "SELECT COUNT(*) FROM pharmacy WHERE chain_key IN "
         "(SELECT DISTINCT chain FROM drug_offer)").fetchone()[0]
@@ -168,6 +243,14 @@ def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
         "CREATE INDEX IF NOT EXISTS ix_ref_inn     ON drug_ref(inn_norm)",
         "CREATE INDEX IF NOT EXISTS ix_ref_atc     ON drug_ref(atc)",
         "CREATE INDEX IF NOT EXISTS ix_free_atc    ON free_drug(atc)",
+        "CREATE INDEX IF NOT EXISTS ix_agg_name    ON agg_product(name_norm)",
+        "CREATE INDEX IF NOT EXISTS ix_agg_atc     ON agg_product(atc)",
+        "CREATE INDEX IF NOT EXISTS ix_agg_city    ON agg_product(city)",
+        "CREATE INDEX IF NOT EXISTS ix_agg_ref     ON agg_product(drug_ref_id)",
+        "CREATE INDEX IF NOT EXISTS ix_po_code     ON pharmacy_offer(product_code, city)",
+        "CREATE INDEX IF NOT EXISTS ix_po_agg      ON pharmacy_offer(agg_product_id)",
+        "CREATE INDEX IF NOT EXISTS ix_po_ref      ON pharmacy_offer(drug_ref_id)",
+        "CREATE INDEX IF NOT EXISTS ix_po_ph       ON pharmacy_offer(pharmacy_id)",
     ]:
         try:
             con.execute(stmt)
@@ -235,6 +318,40 @@ def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
     body = f"{service_part} UNION ALL {drug_part}" if service_part else drug_part
     con.execute(f"CREATE VIEW v_item AS {body}")
 
+    if stats.get("pharmacy_offer", -1) > 0:
+        stats["agg_price_fixed"], stats["agg_price_cleared"] = _fix_agg_prices(con)
+
+    # --- v_drug_price: цена препарата в КОНКРЕТНОЙ аптеке ------------------
+    # Ради этого представления всё и собиралось. v_item отвечает «сколько
+    # стоит», а этот — «куда идти и почём именно там». Отдельно от v_item
+    # намеренно: там одна строка на позицию, здесь — по строке на аптеку,
+    # и смешать их значит посчитать один препарат десять раз.
+    if stats.get("pharmacy_offer", -1) > 0:
+        con.execute(f"""
+            CREATE VIEW v_drug_price AS
+            SELECT o.id, o.city, o.price_kzt,
+                   COALESCE(a.name, o.product_code) AS title,
+                   a.name_norm, o.product_code,
+                   a.inn, a.inn_norm, a.atc, a.is_rx, a.producer, a.base_form,
+                   o.dosage, o.pack_size,
+                   o.drug_ref_id, r.price_cap_retail, r.price_cap_group_max,
+                   o.pharmacy_id, o.pharmacy_name, o.address,
+                   p.chain_key, p.phone, p.working_hours,
+                   p.lat, p.lng, p.rating, p.reviews_count,
+                   o.updated_label, o.updated_on, o.stores_total,
+                   o.source, o.source_url,
+                   CASE WHEN p.twogis_id IS NOT NULL
+                        THEN 'https://2gis.kz/' || {_city_case('o.city')} || '/firm/' || p.twogis_id
+                        ELSE 'https://2gis.kz/' || {_city_case('o.city')} || '/search/' ||
+                             replace(COALESCE(o.address, o.pharmacy_name), ' ', '%20')
+                   END AS twogis_url
+            FROM pharmacy_offer o
+            LEFT JOIN agg_product a ON a.id = o.agg_product_id
+            LEFT JOIN drug_ref   r ON r.id = o.drug_ref_id
+            LEFT JOIN pharmacy   p ON p.id = o.pharmacy_id
+            WHERE o.price_kzt IS NOT NULL
+        """)
+
     # --- v_review: отзывы обоих источников, но источник виден всегда ------
     # Шкалы и базы у 103.kz и 2GIS разные, поэтому не усредняем и не смешиваем —
     # просто складываем рядом с пометкой, откуда взято.
@@ -261,6 +378,8 @@ def build(medprice_db: Path = DEFAULT_MEDPRICE, out: Path = OUT) -> dict:
         "v_item": con.execute("SELECT COUNT(*) FROM v_item").fetchone()[0],
         "v_review": (con.execute("SELECT COUNT(*) FROM v_review").fetchone()[0]
                      if parts else 0),
+        "v_drug_price": (con.execute("SELECT COUNT(*) FROM v_drug_price").fetchone()[0]
+                         if stats.get("pharmacy_offer", -1) > 0 else 0),
     }
     con.close()
     return {**stats, **counts}
@@ -280,3 +399,4 @@ if __name__ == "__main__":
     print(f"  {'v_place (view)':20} {s['v_place']:>8}")
     print(f"  {'v_item  (view)':20} {s['v_item']:>8}")
     print(f"  {'v_review (view)':20} {s['v_review']:>8}")
+    print(f"  {'v_drug_price (view)':20} {s['v_drug_price']:>8}")

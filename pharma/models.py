@@ -73,6 +73,12 @@ class Pharmacy(Base):
     __tablename__ = "pharmacy"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     chain: Mapped[str] = mapped_column(String(255), index=True)
+    # Сеть, сведённая к одному ключу: 2GIS пишет «БИОСФЕРА», «Биосфера» и
+    # «Europharma» как разные организации. Без этого поля цену сети нельзя
+    # посадить на её же физические точки.
+    chain_key: Mapped[str | None] = mapped_column(String(255), index=True)
+    # Идентификатор сети у источника — надёжнее любого разбора названия
+    chain_id: Mapped[str | None] = mapped_column(String(64), index=True)
     name: Mapped[str | None] = mapped_column(String(255))
     city: Mapped[str] = mapped_column(String(64), index=True)
     address: Mapped[str | None] = mapped_column(String(512))
@@ -102,6 +108,10 @@ class DrugOffer(Base):
     sku: Mapped[str | None] = mapped_column(String(64), index=True)
     barcode: Mapped[str | None] = mapped_column(String(32), index=True)   # ★ ключ склейки источников
     name_raw: Mapped[str] = mapped_column(String(512))
+    # Нормализованное название для поиска. Без него интерфейс искал через
+    # LOWER(name_raw), а встроенный LOWER() в SQLite не понимает кириллицу:
+    # запрос «нурофен» строчными не находил ничего вообще.
+    name_norm: Mapped[str | None] = mapped_column(String(512), index=True)
     price_kzt: Mapped[float | None] = mapped_column(Float)
     in_stock: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     is_rx: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -114,6 +124,106 @@ class DrugOffer(Base):
     match_score: Mapped[float | None] = mapped_column(Float)
 
     source: Mapped[str] = mapped_column(String(64), index=True)
+    source_url: Mapped[str | None] = mapped_column(String(512))
+    parsed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class AggProduct(Base):
+    """Позиция каталога агрегатора (apteka.103.kz): товар в конкретном городе.
+
+    Отдельно от DrugRef намеренно. DrugRef — эталон из приказов МЗ РК, у него
+    есть предельная цена и регистрационный номер; здесь ни того, ни другого
+    нет. Зато есть ATC и МНН у позиций, которых в приказах нет вовсе (БАДы,
+    косметика), — из-за этого матч витрины к эталону и не дотягивал до трети.
+
+    Одна строка = один вариант товара: у «Ксеникала» три фасовки (21, 42 и 84
+    капсулы) по 14 500, 19 000 и 45 500 ₸. Схлопывать их в одну позицию
+    нельзя — цена без фасовки ничего не значит.
+    """
+    __tablename__ = "agg_product"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    source: Mapped[str] = mapped_column(String(16), index=True)
+    code: Mapped[str] = mapped_column(String(128), index=True)   # slug товара
+    city: Mapped[str] = mapped_column(String(64), index=True)
+
+    name: Mapped[str] = mapped_column(String(512), index=True)
+    name_norm: Mapped[str] = mapped_column(String(512), index=True)
+    extended_name: Mapped[str | None] = mapped_column(String(512))
+
+    inn: Mapped[str | None] = mapped_column(String(512), index=True)
+    inn_norm: Mapped[str | None] = mapped_column(String(512), index=True)
+    atc: Mapped[str | None] = mapped_column(String(16), index=True)
+    dosage: Mapped[str | None] = mapped_column(String(255))
+    pack_size: Mapped[int | None] = mapped_column(Integer)
+    base_form: Mapped[str | None] = mapped_column(String(64))
+    is_rx: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    producer: Mapped[str | None] = mapped_column(String(512))
+    producer_country: Mapped[str | None] = mapped_column(String(128))
+
+    price_min: Mapped[float | None] = mapped_column(Float)
+    price_max: Mapped[float | None] = mapped_column(Float)
+    price_raw: Mapped[str | None] = mapped_column(String(64))
+
+    category: Mapped[str | None] = mapped_column(String(128), index=True)
+    url: Mapped[str | None] = mapped_column(String(512))
+    instruction_url: Mapped[str | None] = mapped_column(String(512))
+    picture_url: Mapped[str | None] = mapped_column(String(512))
+
+    drug_ref_id: Mapped[str | None] = mapped_column(
+        ForeignKey("drug_ref.id"), nullable=True, index=True)
+    match_method: Mapped[str | None] = mapped_column(String(16))
+    match_score: Mapped[float | None] = mapped_column(Float)
+    parsed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class PharmacyOffer(Base):
+    """Цена в КОНКРЕТНОЙ аптеке, а не «в сети вообще».
+
+    Ради этой таблицы всё и затевалось. DrugOffer знает цену сети без адреса:
+    «Еврофарма — 1 480 ₸», и страница аптек оставалась украшением. Здесь у
+    цены есть точка на карте, телефон, график и дата обновления.
+
+    Поля dosage/pack_size/producer описывают вариант товара, к которому цена
+    относится: список аптек на странице агрегатора привязан к первому
+    варианту, а у «Ксеникала» фасовки различаются втрое по цене.
+
+    stores_total — сколько аптек всего продаёт позицию. Источник отдаёт лишь
+    первую десятку (две промо-строки и восемь самых дешёвых), и интерфейс
+    обязан говорить «8 из 177», а не выдавать десятку за весь рынок.
+    """
+    __tablename__ = "pharmacy_offer"
+    __table_args__ = (
+        UniqueConstraint("source", "city", "product_code", "store_id", name="uq_pharm_offer"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    source: Mapped[str] = mapped_column(String(16), index=True)
+    city: Mapped[str] = mapped_column(String(64), index=True)
+
+    product_code: Mapped[str] = mapped_column(String(128), index=True)
+    agg_product_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agg_product.id"), nullable=True, index=True)
+    drug_ref_id: Mapped[str | None] = mapped_column(
+        ForeignKey("drug_ref.id"), nullable=True, index=True)
+
+    pharmacy_id: Mapped[str | None] = mapped_column(
+        ForeignKey("pharmacy.id"), nullable=True, index=True)
+    store_id: Mapped[str] = mapped_column(String(32), index=True)
+    pharmacy_name: Mapped[str | None] = mapped_column(String(255))
+    address: Mapped[str | None] = mapped_column(String(512))
+
+    price_kzt: Mapped[float | None] = mapped_column(Float, index=True)
+    quantity_raw: Mapped[str | None] = mapped_column(String(64))
+    dosage: Mapped[str | None] = mapped_column(String(255))
+    pack_size: Mapped[int | None] = mapped_column(Integer)
+    producer: Mapped[str | None] = mapped_column(String(512))
+
+    # как свежесть подписана на сайте и во что она разобралась
+    updated_label: Mapped[str | None] = mapped_column(String(64))
+    updated_on: Mapped[str | None] = mapped_column(String(16), index=True)
+    stores_total: Mapped[int | None] = mapped_column(Integer)
+
     source_url: Mapped[str | None] = mapped_column(String(512))
     parsed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

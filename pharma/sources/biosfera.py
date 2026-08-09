@@ -20,15 +20,23 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import httpx
 from selectolax.parser import HTMLParser
 
 SITEMAP = "https://biosfera.kz/sitemap-products.xml"
 CHAIN = "Биосфера"
+
+# Обход 33 тысяч карточек идёт больше получаса. Прошлый запуск писал результат
+# одним файлом в самом конце — процесс прервали, и все сорок минут пропали.
+# Теперь каждая карточка ложится на диск сразу, а повторный запуск дочитывает
+# с того места, где остановился.
+CHECKPOINT = Path(__file__).resolve().parents[2] / "data" / "biosfera_progress.jsonl"
 UA = {"User-Agent": "MedRouteKZ/1.0 (hackathon research; contact: abdrashabzal.bs@gmail.com)",
       "Accept-Language": "ru-RU,ru;q=0.9"}
 
@@ -94,30 +102,69 @@ def _fetch_one(cli: httpx.Client, url: str) -> Offer | None:
         return None
 
 
-def scrape(limit: int | None = None, *, progress_every: int = 500) -> list[Offer]:
-    urls = product_urls(limit)
-    print(f"  [biosfera] адресов к обходу: {len(urls)}")
+def load_checkpoint(path: Path = CHECKPOINT) -> list[Offer]:
+    """Уже обойдённые карточки. Битую последнюю строку молча пропускаем:
+    процесс могли убить на середине записи."""
+    if not path.exists():
+        return []
     out: list[Offer] = []
-    with httpx.Client(headers=UA, timeout=25.0, verify=False,
-                      follow_redirects=True) as cli:
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            futures = {pool.submit(_fetch_one, cli, u): u for u in urls}
-            done = 0
-            for fut in as_completed(futures):
-                done += 1
-                o = fut.result()
-                if o and o.name:
-                    out.append(o)
-                if done % progress_every == 0:
-                    got = sum(1 for x in out if x.price_kzt)
-                    print(f"    [{done}/{len(urls)}] распознано {len(out)}, с ценой {got}")
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            out.append(Offer(**json.loads(line)))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def scrape(limit: int | None = None, *, progress_every: int = 500,
+           checkpoint: Path | None = CHECKPOINT, resume: bool = True) -> list[Offer]:
+    urls = product_urls(limit)
+
+    out: list[Offer] = []
+    if checkpoint and resume:
+        out = load_checkpoint(checkpoint)
+        seen = {o.url for o in out}
+        urls = [u for u in urls if u not in seen]
+        if out:
+            print(f"  [biosfera] из чекпойнта: {len(out)}, осталось: {len(urls)}")
+    if checkpoint:
+        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"  [biosfera] адресов к обходу: {len(urls)}")
+    lock = threading.Lock()
+    fh = checkpoint.open("a", encoding="utf-8") if checkpoint else None
+    try:
+        with httpx.Client(headers=UA, timeout=25.0, verify=False,
+                          follow_redirects=True) as cli:
+            with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+                futures = {pool.submit(_fetch_one, cli, u): u for u in urls}
+                done = 0
+                for fut in as_completed(futures):
+                    done += 1
+                    o = fut.result()
+                    if o and o.name:
+                        out.append(o)
+                        if fh:
+                            with lock:
+                                fh.write(json.dumps(asdict(o), ensure_ascii=False) + "\n")
+                                fh.flush()
+                    if done % progress_every == 0:
+                        got = sum(1 for x in out if x.price_kzt)
+                        print(f"    [{done}/{len(urls)}] распознано {len(out)}, с ценой {got}",
+                              flush=True)
+    finally:
+        if fh:
+            fh.close()
     return out
 
 
 if __name__ == "__main__":
     import sys
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 40
-    offers = scrape(limit=n, progress_every=20)
+    # проверочный запуск в чекпойнт не пишем: он для полного обхода
+    offers = scrape(limit=n, progress_every=20, checkpoint=None)
     with_price = [o for o in offers if o.price_kzt]
     print(f"\nполучено {len(offers)}, с ценой {len(with_price)}")
     for o in with_price[:5]:

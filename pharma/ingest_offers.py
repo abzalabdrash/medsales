@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
@@ -61,14 +62,20 @@ def _brand_key(name: str) -> str:
     return n[:BUCKET_LEN] if n else ""
 
 
-def match_offers(session, offers, *, threshold: int = 88) -> Counter:
+def match_offers(session, offers, *, threshold: int = 88,
+                 name_of: Callable[[object], str] | None = None) -> Counter:
     """Матчинг предложение -> DrugRef по названию + сверка дозировки и упаковки.
 
     Матч принимается только если совпало И название (fuzz >= threshold),
     И размер упаковки (если он есть у обеих сторон). Дозировка добавляет
     уверенности. Ошибиться дороже, чем не сматчить: неверный матч приведёт
     к неверному расчёту курса и неверному выводу о переплате.
+
+    name_of — как достать название: у DrugOffer оно лежит в name_raw готовой
+    строкой, у позиции каталога агрегатора собирается из марки, дозировки и
+    фасовки. Логика матчинга при этом одна и та же.
     """
+    name_of = name_of or (lambda o: o.name_raw)
     refs = session.query(DrugRef).all()
     by_key: dict[str, list[DrugRef]] = {}
     for r in refs:
@@ -77,8 +84,7 @@ def match_offers(session, offers, *, threshold: int = 88) -> Counter:
     stats = Counter()
     for o in offers:
         stats["total"] += 1
-        # сюда приходят ORM-объекты DrugOffer, у них поле name_raw, а не name
-        name = o.name_raw
+        name = name_of(o)
         key = _brand_key(name)
         bucket = by_key.get(key) or []
         if not bucket:
@@ -97,8 +103,12 @@ def match_offers(session, offers, *, threshold: int = 88) -> Counter:
 
         cand = bucket[best[2]]
         # --- сверка упаковки: защита от «то же название, другая фасовка» ---
-        pm = _PACK_IN_NAME.search(name)
-        offer_pack = int(pm.group(1)) if pm else None
+        # У агрегатора фасовка приходит отдельным полем и ей можно верить;
+        # у витрины сети её приходится выковыривать из названия («… №20»).
+        offer_pack = getattr(o, "pack_size", None)
+        if not offer_pack:
+            pm = _PACK_IN_NAME.search(name)
+            offer_pack = int(pm.group(1)) if pm else None
         if offer_pack and cand.pack_size and offer_pack != cand.pack_size:
             same_pack = [r for r in bucket if r.pack_size == offer_pack]
             if same_pack:
@@ -129,21 +139,32 @@ def _biosfera_rows() -> list[DrugOffer]:
         data = json.loads(path.read_text(encoding="utf-8"))
         raw = [biosfera.Offer(**d) for d in data]
         print(f"  [biosfera] из кэша: {len(raw)}")
+    elif (partial := biosfera.load_checkpoint()):
+        # обход ещё идёт или был прерван — берём то, что уже на диске.
+        # Половина сети лучше, чем ничего: сравнение цен появляется уже на ней.
+        raw = partial
+        print(f"  [biosfera] из незаконченного обхода: {len(raw)}")
     else:
         raw = biosfera.scrape()
         path.write_text(json.dumps([asdict(o) for o in raw], ensure_ascii=False),
                         encoding="utf-8")
 
-    return [
-        DrugOffer(
-            id=det_id("of", "biosfera", o.sku),
+    # Ключ строится по адресу карточки, а не по артикулу: в карте сайта
+    # встречаются разные товары с одним и тем же sku (склеенные коды вида
+    # «M-009025M-005262»), и по артикулу они давали одинаковый id.
+    rows: dict[str, DrugOffer] = {}
+    for o in raw:
+        if not o.name:
+            continue
+        oid = det_id("of", "biosfera", o.url)
+        rows.setdefault(oid, DrugOffer(
+            id=oid,
             chain=biosfera.CHAIN, sku=o.sku, name_raw=o.name,
+            name_norm=norm_name(o.name),
             price_kzt=o.price_kzt, in_stock=o.in_stock,
             source="biosfera", source_url=o.url,
-        )
-        for o in raw
-        if o.name
-    ]
+        ))
+    return list(rows.values())
 
 
 def _dump_raw(raw: list) -> None:
@@ -195,7 +216,7 @@ def run(max_categories: int | None = None, max_pages: int = 200,
             id=det_id("of", "europharma", o.sku),
             chain=europharma.CHAIN,
             sku=o.sku, barcode=o.barcode,
-            name_raw=o.name, price_kzt=o.price_kzt,
+            name_raw=o.name, name_norm=norm_name(o.name), price_kzt=o.price_kzt,
             is_rx=o.is_rx, category_raw=o.category_raw,
             manufacturer=o.manufacturer,
             in_stock=True if o.price_kzt else None,

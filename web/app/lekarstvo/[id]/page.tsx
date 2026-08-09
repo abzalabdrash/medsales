@@ -5,9 +5,10 @@ import { getDict } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CourseCalculator } from "@/components/CourseCalculator";
-import { getAnalogs, getDrug, getFreeCoverage } from "@/lib/drugs";
+import { getAnalogs, getDrug, getFreeCoverage, pharmacyPrices } from "@/lib/drugs";
 import { tenge } from "@/lib/format";
 import { PharmacyCard } from "@/components/PharmacyCard";
+import { PharmacyPriceTable } from "@/components/PharmacyPriceTable";
 import { pharmaciesForChain } from "@/lib/pharmacies";
 import { withCity } from "@/lib/url";
 
@@ -28,7 +29,11 @@ export default async function DrugPage({
 
   const analogs = getAnalogs(drug.atc, drug.refId);
   const free = getFreeCoverage(drug.atc, drug.inn);
-  const branches = pharmaciesForChain(drug.chain, city);
+  // Цены по конкретным точкам, если они есть; иначе — адреса сети с её
+  // единым ценником. Одновременно показывать оба блока незачем: они
+  // отвечают на один вопрос, просто с разной точностью.
+  const prices = pharmacyPrices(drug.refId, drug.title, city);
+  const branches = prices.length > 0 ? [] : pharmaciesForChain(drug.chain, city);
   const cheaper = analogs.filter(
     (a) => a.price !== null && drug.price !== null && a.price < drug.price,
   );
@@ -165,6 +170,8 @@ export default async function DrugPage({
           price={drug.price}
         />
       </div>
+
+      <PharmacyPriceTable rows={prices} city={city} />
 
       {branches.length > 0 && (
         <section className="mt-10">

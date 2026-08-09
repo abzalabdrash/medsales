@@ -9,3 +9,10 @@ data/pharma.db
 data/cache/
 data/adilet_raw.json
 data/*.log
+
+# журналы обходов: 45 МБ сырых строк, из которых собирается medsales.db.
+# Восстанавливаются повторным запуском парсеров, а обходчики умеют
+# продолжать с места остановки, поэтому в репозитории им не место.
+data/agg103_*.jsonl
+data/agg103_*.done
+data/biosfera_progress.jsonl
