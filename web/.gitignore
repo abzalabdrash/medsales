@@ -6,5 +6,6 @@
 next-env.d.ts
 .DS_Store
 .env*
-# keep the database out of git; place it at ../data/medprice.db
+# keep the database out of git by default; allow medsales for Vercel upload
 /data/*.db
+!/data/medsales.db

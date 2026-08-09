@@ -12,63 +12,138 @@ import { useI18n } from "./I18nProvider";
 import { resolveCity } from "@/lib/cities";
 import { withCity } from "@/lib/url";
 
+function NavLinks({
+  city,
+  clinicsLabel,
+  assistantActive,
+}: {
+  city: string;
+  clinicsLabel: string;
+  assistantActive?: boolean;
+}) {
+  return (
+    <>
+      <Link
+        href={withCity("/kliniki", city)}
+        className="shrink-0 text-sm font-medium text-muted transition-colors hover:text-ink"
+      >
+        {clinicsLabel}
+      </Link>
+      <Link
+        href={withCity("/lekarstva", city)}
+        className="shrink-0 text-sm font-medium text-muted transition-colors hover:text-ink"
+      >
+        Лекарства
+      </Link>
+      <Link
+        href={withCity("/apteki", city)}
+        className="hidden shrink-0 text-sm font-medium text-muted transition-colors hover:text-ink lg:inline"
+      >
+        Аптеки
+      </Link>
+      <Link
+        href={withCity("/pomoshnik", city)}
+        className={
+          assistantActive
+            ? "pressable inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-brand px-3 py-1.5 text-sm font-semibold text-white shadow-sm"
+            : "pressable inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-brand/35 bg-brand-wash px-3 py-1.5 text-sm font-semibold text-brand-ink transition-colors hover:border-brand/55 hover:bg-brand/15"
+        }
+      >
+        <Sparkles size={15} aria-hidden />
+        Помощник
+      </Link>
+    </>
+  );
+}
+
 function HeaderInner() {
   const pathname = usePathname();
   const { t } = useI18n();
   const city = resolveCity(useSearchParams().get("city"));
   const showSearch = pathname !== "/";
+  const onAssistant = pathname.startsWith("/pomoshnik");
 
+  const utils = (
+    <div className="flex items-center gap-1 sm:gap-2">
+      <Link
+        href={withCity("/kabinet", city)}
+        aria-label={t.cabinetNav}
+        title={t.cabinetNav}
+        className="pressable grid h-11 w-11 shrink-0 place-items-center rounded-xl text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+      >
+        <UserRound size={20} aria-hidden />
+      </Link>
+      <CityPicker city={city} />
+      <LangSwitcher />
+    </div>
+  );
+
+  // Лендинг: три зоны, вкладки по центру контейнера (поиск в hero).
+  if (!showSearch) {
+    return (
+      <div className="mx-auto w-full max-w-[1100px] px-4 py-2.5 sm:px-6">
+        <div className="grid grid-cols-[1fr_auto] items-center gap-2 sm:grid-cols-[1fr_auto_1fr]">
+          <div className="justify-self-start">
+            <Logo />
+          </div>
+          <nav
+            aria-label="Основное меню"
+            className="hidden items-center gap-4 sm:flex"
+          >
+            <NavLinks
+              city={city}
+              clinicsLabel={t.clinicsNav}
+              assistantActive={onAssistant}
+            />
+          </nav>
+          <div className="justify-self-end">{utils}</div>
+        </div>
+        {/* мобилка: вкладки второй строкой */}
+        <nav
+          aria-label="Основное меню"
+          className="mt-2 flex items-center justify-center gap-3 overflow-x-auto sm:hidden"
+        >
+          <NavLinks
+            city={city}
+            clinicsLabel={t.clinicsNav}
+            assistantActive={onAssistant}
+          />
+        </nav>
+      </div>
+    );
+  }
+
+  // Вкладки каталога: поиск в шапке.
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-2.5 sm:px-6">
       <div className="flex items-center gap-2 sm:gap-3">
         <Logo />
-        <Link
-          href={withCity("/kliniki", city)}
-          className="hidden shrink-0 text-sm font-medium text-muted transition-colors hover:text-ink sm:block"
+        <nav
+          aria-label="Основное меню"
+          className="hidden items-center gap-3 lg:flex"
         >
-          {t.clinicsNav}
-        </Link>
-        <Link
-          href={withCity("/lekarstva", city)}
-          className="hidden shrink-0 text-sm font-medium text-muted transition-colors hover:text-ink sm:block"
-        >
-          Лекарства
-        </Link>
-        <Link
-          href={withCity("/apteki", city)}
-          className="hidden shrink-0 text-sm font-medium text-muted transition-colors hover:text-ink lg:block"
-        >
-          Аптеки
-        </Link>
-        <Link
-          href={withCity("/pomoshnik", city)}
-          className="pressable hidden shrink-0 items-center gap-1.5 rounded-lg bg-brand-wash px-2.5 py-1.5 text-sm font-semibold text-brand-ink transition-colors hover:bg-brand/15 sm:flex"
-        >
-          <Sparkles size={15} aria-hidden />
-          Помощник
-        </Link>
-        {showSearch ? (
-          <div className="hidden min-w-0 flex-1 sm:block">
-            <SearchBox city={city} variant="compact" />
-          </div>
-        ) : null}
-        <div className={showSearch ? "flex-1 sm:hidden" : "flex-1"} />
-        <Link
-          href={withCity("/kabinet", city)}
-          aria-label={t.cabinetNav}
-          title={t.cabinetNav}
-          className="pressable grid h-11 w-11 shrink-0 place-items-center rounded-xl text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-        >
-          <UserRound size={20} aria-hidden />
-        </Link>
-        <CityPicker city={city} />
-        <LangSwitcher />
-      </div>
-      {showSearch && (
-        <div className="mt-2 sm:hidden">
+          <NavLinks
+            city={city}
+            clinicsLabel={t.clinicsNav}
+            assistantActive={onAssistant}
+          />
+        </nav>
+        <div className="hidden min-w-0 flex-1 sm:block">
           <SearchBox city={city} variant="compact" />
         </div>
-      )}
+        <div className="flex-1 sm:hidden" />
+        {utils}
+      </div>
+      <div className="mt-2 flex items-center gap-2 overflow-x-auto lg:hidden">
+        <NavLinks
+          city={city}
+          clinicsLabel={t.clinicsNav}
+          assistantActive={onAssistant}
+        />
+      </div>
+      <div className="mt-2 sm:hidden">
+        <SearchBox city={city} variant="compact" />
+      </div>
     </div>
   );
 }

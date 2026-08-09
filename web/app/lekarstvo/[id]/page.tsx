@@ -5,6 +5,7 @@ import { getDict } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CourseCalculator } from "@/components/CourseCalculator";
+import { LazyMap } from "@/components/LazyMap";
 import { getAnalogs, getDrug, getFreeCoverage, pharmacyPrices } from "@/lib/drugs";
 import { tenge } from "@/lib/format";
 import { PharmacyCard } from "@/components/PharmacyCard";
@@ -158,8 +159,15 @@ export default async function DrugPage({
               rel="noopener noreferrer"
               className="mt-5 inline-block text-sm text-brand-ink underline"
             >
-              Открыть в аптеке
+              Карточка на сайте сети
+              {drug.chain ? ` «${drug.chain}»` : ""}
             </a>
+          )}
+          {prices.length > 0 && (
+            <p className="mt-2 text-xs text-muted">
+              Где купить дешевле — в таблице аптек ниже. Ссылка выше ведёт на
+              страницу товара у сети, а не в конкретную точку.
+            </p>
           )}
         </div>
 
@@ -172,6 +180,34 @@ export default async function DrugPage({
       </div>
 
       <PharmacyPriceTable rows={prices} city={city} />
+
+      {prices.some((p) => p.lat != null && p.lng != null) && (
+        <section className="mt-8">
+          <h2 className="text-lg font-semibold">На карте</h2>
+          <p className="mt-1 text-sm text-muted">
+            Цена на маркере — в этой аптеке. Клик по маркеру → маршрут в 2GIS.
+          </p>
+          <div className="mt-4">
+            <LazyMap
+              height={380}
+              points={prices
+                .filter((p) => p.lat != null && p.lng != null)
+                .map((p) => ({
+                  id: p.id,
+                  label: p.pharmacyName,
+                  lat: p.lat as number,
+                  lng: p.lng as number,
+                  price: p.price,
+                  address: p.address,
+                  rating: p.rating,
+                  reviews: p.reviews,
+                  city,
+                  twogisId: p.twogisUrl?.match(/\/firm\/(\d+)/)?.[1] ?? null,
+                }))}
+            />
+          </div>
+        </section>
+      )}
 
       {branches.length > 0 && (
         <section className="mt-10">

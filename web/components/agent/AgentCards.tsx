@@ -4,7 +4,6 @@ import {
 } from "lucide-react";
 import type { Card } from "@/lib/agent/cards";
 import { tenge } from "@/lib/format";
-
 /**
  * Карточки ответа помощника.
  *
@@ -93,14 +92,11 @@ export function AgentCard({ card }: { card: Card }) {
           {/* Вся строка это ссылка в 2GIS: своей страницы у аптеки нет и не
               нужно, человеку нужен маршрут и отзывы, а они уже там. */}
           <ul className="mt-2 space-y-1">
-            {card.rows.map((r, i) => (
-              <li key={i}>
-                <a
-                  href={r.twogisUrl ?? undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="pressable -mx-1 block rounded-lg px-1 py-1.5 transition hover:bg-brand-wash/60"
-                >
+            {card.rows.map((r, i) => {
+              const href =
+                r.twogisUrl && /\/firm\//.test(r.twogisUrl) ? r.twogisUrl : null;
+              const body = (
+                <>
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="truncate text-xs font-medium text-ink">{r.pharmacy}</span>
                     <span className="shrink-0 text-xs font-semibold tabular-nums text-ink">
@@ -117,11 +113,27 @@ export function AgentCard({ card }: { card: Card }) {
                     <Rating value={r.rating} count={r.reviews} />
                     {r.packSize && <span>{r.packSize} шт.</span>}
                     {r.updated && <span>{r.updated}</span>}
-                    <span className="text-brand-ink">2GIS →</span>
+                    {href && <span className="text-brand-ink">2GIS →</span>}
                   </span>
-                </a>
+                </>
+              );
+              return (
+              <li key={i}>
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="pressable -mx-1 block rounded-lg px-1 py-1.5 transition hover:bg-brand-wash/60"
+                  >
+                    {body}
+                  </a>
+                ) : (
+                  <div className="-mx-1 rounded-lg px-1 py-1.5">{body}</div>
+                )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       );
@@ -156,7 +168,7 @@ export function AgentCard({ card }: { card: Card }) {
         <div className={BOX}>
           <div className="flex items-center gap-2 text-sm font-medium text-ink">
             <Calculator size={16} className="text-brand-ink" aria-hidden />
-            Расчет курса
+            Расчет курса{card.title ? `: ${card.title}` : ""}
           </div>
           <p className="mt-1 text-xs text-muted">{card.explainer}</p>
           {card.coursePrice !== null && (
@@ -232,12 +244,22 @@ export function AgentCard({ card }: { card: Card }) {
           <p className="text-xs text-muted">
             Если объезжать весь город ради минимума: {tenge(card.cheapestTotal)}.
             {card.oneStopTotal !== null && card.oneStopName && (
-              <> Если все в одной аптеке «{card.oneStopName}»: {tenge(card.oneStopTotal)}.</>
+              <>
+                {" "}
+                Если все в одной аптеке «{card.oneStopName}»
+                {card.oneStopAddress ? ` (${card.oneStopAddress})` : ""}
+                {card.oneStopDistanceKm != null ? `, ~${card.oneStopDistanceKm} км` : ""}
+                {card.oneStopRating != null ? `, ★ ${card.oneStopRating}` : ""}:{" "}
+                {tenge(card.oneStopTotal)}.
+              </>
             )}
           </p>
 
           <ol className="mt-3 space-y-2">
-            {card.stops.map((st, i) => (
+            {card.stops.map((st, i) => {
+              const href =
+                st.twogisUrl && /\/firm\//.test(st.twogisUrl) ? st.twogisUrl : null;
+              return (
               <li key={i} className="rounded-lg border border-line bg-surface p-2.5">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="truncate text-xs font-semibold text-ink">
@@ -247,16 +269,29 @@ export function AgentCard({ card }: { card: Card }) {
                     {tenge(st.subtotal)}
                   </span>
                 </div>
-                {st.address && (
-                  <a
-                    href={st.twogisUrl ?? undefined}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-0.5 flex items-start gap-1 text-[11px] text-muted hover:text-brand-ink"
-                  >
-                    <MapPin size={11} className="mt-0.5 shrink-0" aria-hidden />
-                    <span className="line-clamp-1">{st.address}</span>
-                  </a>
+                {st.address &&
+                  (href ? (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-0.5 flex items-start gap-1 text-[11px] text-muted hover:text-brand-ink"
+                    >
+                      <MapPin size={11} className="mt-0.5 shrink-0" aria-hidden />
+                      <span className="line-clamp-1">{st.address}</span>
+                    </a>
+                  ) : (
+                    <span className="mt-0.5 flex items-start gap-1 text-[11px] text-muted">
+                      <MapPin size={11} className="mt-0.5 shrink-0" aria-hidden />
+                      <span className="line-clamp-1">{st.address}</span>
+                    </span>
+                  ))}
+                {(st.rating != null || st.distanceKm != null) && (
+                  <div className="mt-0.5 text-[11px] text-muted">
+                    {st.rating != null && <>★ {st.rating}</>}
+                    {st.rating != null && st.distanceKm != null && " · "}
+                    {st.distanceKm != null && <>~{st.distanceKm} км</>}
+                  </div>
                 )}
                 <ul className="mt-1.5 space-y-0.5">
                   {st.lines.map((l, j) => (
@@ -270,7 +305,8 @@ export function AgentCard({ card }: { card: Card }) {
                   ))}
                 </ul>
               </li>
-            ))}
+              );
+            })}
           </ol>
 
           {card.missing.length > 0 && (
@@ -325,6 +361,7 @@ export function AgentCard({ card }: { card: Card }) {
 /** Позиции, распознанные с фотографии назначения. */
 export function PrescriptionCard({
   items,
+  showRaw = false,
 }: {
   items: {
     name: string;
@@ -332,7 +369,9 @@ export function PrescriptionCard({
     timesPerDay?: number | null;
     days?: number | null;
     confidence?: number | null;
+    raw?: string | null;
   }[];
+  showRaw?: boolean;
 }) {
   return (
     <div className={BOX}>
@@ -341,8 +380,6 @@ export function PrescriptionCard({
       </span>
       <ul className="mt-2 space-y-1.5">
         {items.map((x, i) => {
-          // Низкую уверенность показываем честно: человек должен видеть,
-          // где машина угадывала, а не узнать об этом в аптеке.
           const unsure = (x.confidence ?? 1) < 0.7;
           return (
             <li key={i} className="text-xs">
@@ -360,6 +397,9 @@ export function PrescriptionCard({
                 <span className="ml-1 rounded bg-brand-wash px-1 text-[10px] text-brand-ink">
                   проверьте
                 </span>
+              )}
+              {showRaw && x.raw && (
+                <p className="mt-0.5 whitespace-pre-wrap text-[10px] text-muted">{x.raw}</p>
               )}
             </li>
           );

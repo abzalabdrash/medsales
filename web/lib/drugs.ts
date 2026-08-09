@@ -194,16 +194,31 @@ export function searchCatalog(q: string, city: string, limit = 8): DrugDetail[] 
   // каталоге лежит «Аевит», и обычное сравнение их не сводит.
   const COMPACT = "REPLACE(REPLACE(REPLACE(a.name_norm, '-', ''), ' ', ''), '.', '')";
 
-  const askAgg = (t: string, compact = false) =>
-    db()
+  // Короткие токены вроде «уголь» в inn дают Аллохол / Юниэнзим / Сорбикапс.
+  // Для них ищем только по названию; INN — для запросов длиннее 5 букв.
+  const askAgg = (t: string, compact = false) => {
+    const useInn = t.replace(/\s/g, "").length > 5;
+    if (useInn) {
+      return db()
+        .prepare(
+          `${AGG_SELECT}
+           WHERE a.city = ? AND a.price_min > 0
+             AND (${compact ? `${COMPACT} LIKE ?` : "a.name_norm LIKE ?"} OR a.inn_norm LIKE ?)
+           ORDER BY (a.name_norm LIKE ?) DESC, a.price_min ASC
+           LIMIT ?`,
+        )
+        .all(city, `%${t}%`, `%${t}%`, `${t}%`, limit) as Raw[];
+    }
+    return db()
       .prepare(
         `${AGG_SELECT}
          WHERE a.city = ? AND a.price_min > 0
-           AND (${compact ? `${COMPACT} LIKE ?` : "a.name_norm LIKE ?"} OR a.inn_norm LIKE ?)
+           AND (${compact ? `${COMPACT} LIKE ?` : "a.name_norm LIKE ?"})
          ORDER BY (a.name_norm LIKE ?) DESC, a.price_min ASC
          LIMIT ?`,
       )
-      .all(city, `%${t}%`, `%${t}%`, `${t}%`, limit) as Raw[];
+      .all(city, `%${t}%`, `${t}%`, limit) as Raw[];
+  };
 
   let agg: Raw[] = [];
   for (const [t, compact] of searchAttempts(term)) {
@@ -228,16 +243,35 @@ export function searchCatalog(q: string, city: string, limit = 8): DrugDetail[] 
   // Сначала то, где искомое слово реально стоит в названии: «мыло Safeguard»
   // важнее «мыла детского», даже если детское дешевле и нашлось первым.
   const compact = term.replace(/[-\s.]/g, "");
+  const tokens = term.split(/\s+/).filter((w) => w.length >= 4);
   const hit = (t: string) => {
     const n = normalizeName(t);
-    return n.includes(term) || n.replace(/[-\s.]/g, "").includes(compact);
+    if (n.includes(term) || n.replace(/[-\s.]/g, "").includes(compact)) return true;
+    if (
+      tokens.length >= 2 &&
+      tokens.every((tok) => n.includes(tok.slice(0, Math.min(5, tok.length))))
+    ) {
+      return true;
+    }
+    // Уголь в названии (не только в INN у Сорбикапса/Юниэнзима)
+    if (term.includes("уголь") && n.includes("уголь")) return true;
+    return false;
   };
-  return merged
+  const multiInn = (inn: string | null) =>
+    !!inn && (inn.includes("+") || inn.includes(",") || inn.split(/\s+/).length > 4);
+
+  const ranked = merged
     .sort((a, b) => {
       const d = Number(hit(b.title)) - Number(hit(a.title));
-      return d !== 0 ? d : (a.price ?? Infinity) - (b.price ?? Infinity);
-    })
-    .slice(0, limit);
+      if (d !== 0) return d;
+      const mi = Number(multiInn(a.inn)) - Number(multiInn(b.inn));
+      if (mi !== 0) return mi;
+      return (a.price ?? Infinity) - (b.price ?? Infinity);
+    });
+  // Если есть прямые попадания в название — не разбавляем Сорбикапсом/Юниэнзимом
+  // из INN-матча.
+  const named = ranked.filter((x) => hit(x.title));
+  return (named.length > 0 ? named : ranked).slice(0, limit);
 }
 
 export function listDrugs(opts: {
@@ -360,6 +394,8 @@ export type PharmacyPrice = {
   twogisUrl: string | null;
   rating: number | null;
   reviews: number | null;
+  lat: number | null;
+  lng: number | null;
   /** Сколько аптек продаёт позицию всего — источник отдаёт лишь первые. */
   storesTotal: number | null;
 };
@@ -387,24 +423,37 @@ export function pharmacyPrices(
   city: string,
   limit = 12,
 ): PharmacyPrice[] {
-  const code = pickProductCode(refId, title, city);
-  if (!code) return [];
+  // Несколько кодов одной позиции (103 + Рауза), иначе one-stop на Навои
+  // ломается на редком ugol_aktivirovannyy без филиала Раузы.
+  const codes = pickProductCodes(refId, title, city);
+  if (codes.length === 0) return [];
 
-  const rows = db()
-    .prepare(
-      `SELECT id, price_kzt AS price, pharmacy_id AS pharmacyId,
-              pharmacy_name AS pharmacyName, address, chain_key AS chain,
-              phone, working_hours AS hours, pack_size AS packSize, dosage, producer,
-              updated_label AS updatedLabel, updated_on AS updatedOn,
-              twogis_url AS twogisUrl, stores_total AS storesTotal,
-              rating, reviews_count AS reviews
-       FROM v_drug_price
-       WHERE product_code = ? AND city = ?
-       ORDER BY price_kzt`,
-    )
-    .all(code, city) as Raw[];
+  const rows: Raw[] = [];
+  const seenPh = new Set<string>();
+  for (const code of codes) {
+    const part = db()
+      .prepare(
+        `SELECT id, price_kzt AS price, pharmacy_id AS pharmacyId,
+                pharmacy_name AS pharmacyName, address, chain_key AS chain,
+                phone, working_hours AS hours, pack_size AS packSize, dosage, producer,
+                updated_label AS updatedLabel, updated_on AS updatedOn,
+                twogis_url AS twogisUrl, stores_total AS storesTotal,
+                rating, reviews_count AS reviews, lat, lng
+         FROM v_drug_price
+         WHERE product_code = ? AND city = ?
+         ORDER BY price_kzt`,
+      )
+      .all(code, city) as Raw[];
+    for (const r of part) {
+      const key = String(r.pharmacyId ?? "") + "|" + String(r.address ?? "");
+      if (seenPh.has(key)) continue;
+      seenPh.add(key);
+      rows.push(r);
+    }
+  }
 
   return dropPlaceholderPrices(rows)
+    .sort((a, b) => (a.price as number) - (b.price as number))
     .slice(0, limit)
     .map((x) => ({
     id: x.id as string,
@@ -424,6 +473,8 @@ export function pharmacyPrices(
       storesTotal: (x.storesTotal as number) ?? null,
       rating: (x.rating as number) ?? null,
       reviews: (x.reviews as number) ?? null,
+      lat: (x.lat as number) ?? null,
+      lng: (x.lng as number) ?? null,
     }));
 }
 
@@ -445,7 +496,7 @@ function pickProductCode(
   city: string,
 ): string | null {
   const want = normalizeName(title);
-  const candidates = (
+  let candidates = (
     refId
       ? (db()
           .prepare(
@@ -464,24 +515,117 @@ function pickProductCode(
       )
       .all(want, city) as Raw[],
   );
+
+  // Сеть (of_) и агрегатор (103) часто пишут одно и то же по-разному:
+  // «цитрамон-боримед no6 табл» vs «цитрамон боримед табл n6». Если точного
+  // совпадения нет, берём кандидатов по первому слову марки.
+  if (candidates.length === 0) {
+    const token = want.split(" ")[0]?.replace(/-/g, "") ?? "";
+    if (token.length >= 4) {
+      candidates = db()
+        .prepare(
+          `SELECT product_code AS code, name_norm AS name, COUNT(*) AS n
+           FROM v_drug_price
+           WHERE city = ? AND (name_norm LIKE ? OR replace(name_norm,'-','') LIKE ?)
+           GROUP BY product_code
+           LIMIT 30`,
+        )
+        .all(city, `${token}%`, `${token}%`) as Raw[];
+    }
+  }
   if (candidates.length === 0) return null;
 
+  const wantCompact = want.replace(/-/g, "").replace(/\s+/g, "");
   let best: { code: string; score: number; n: number } | null = null;
   for (const c of candidates) {
     const name = (c.name as string) ?? "";
     const n = (c.n as number) ?? 0;
+    const nameCompact = name.replace(/-/g, "").replace(/\s+/g, "");
     // Точное совпадение названия важнее числа аптек: больше строк у более
     // популярной формы, а нужна та, которую человек открыл.
-    const score = name === want ? 2 : want.startsWith(name) || name.startsWith(want) ? 1 : 0;
+    let score = 0;
+    if (name === want || nameCompact === wantCompact) score = 3;
+    else if (want.startsWith(name) || name.startsWith(want)) score = 2;
+    else if (nameCompact.includes(wantCompact.slice(0, 10)) || wantCompact.includes(nameCompact.slice(0, 10)))
+      score = 1;
     if (!best || score > best.score || (score === best.score && n > best.n)) {
       best = { code: c.code as string, score, n };
     }
   }
-  return best?.code ?? null;
+  return best && best.score > 0 ? best.code : null;
+}
+
+/** До 3 кодов одной позиции (агрегатор + сети), чтобы маршрут видел Раузу. */
+function pickProductCodes(
+  refId: string | null,
+  title: string,
+  city: string,
+): string[] {
+  const want = normalizeName(title);
+  let candidates = (
+    refId
+      ? (db()
+          .prepare(
+            `SELECT product_code AS code, name_norm AS name, COUNT(*) AS n
+             FROM v_drug_price WHERE drug_ref_id = ? AND city = ?
+             GROUP BY product_code`,
+          )
+          .all(refId, city) as Raw[])
+      : []
+  ).concat(
+    db()
+      .prepare(
+        `SELECT product_code AS code, name_norm AS name, COUNT(*) AS n
+         FROM v_drug_price WHERE name_norm = ? AND city = ?
+         GROUP BY product_code`,
+      )
+      .all(want, city) as Raw[],
+  );
+  // Всегда добираем по марке: иначе «Олиго цинк» цепляет редкий 103,
+  // а Рауза «ОЛИГО ЦИНК N90…» с 54 филиалами не попадает в маршрут.
+  {
+    const token = want.split(" ")[0]?.replace(/-/g, "") ?? "";
+    if (token.length >= 4) {
+      const extra = db()
+        .prepare(
+          `SELECT product_code AS code, name_norm AS name, COUNT(*) AS n
+           FROM v_drug_price
+           WHERE city = ? AND (name_norm LIKE ? OR replace(name_norm,'-','') LIKE ?)
+           GROUP BY product_code
+           LIMIT 30`,
+        )
+        .all(city, `${token}%`, `${token}%`) as Raw[];
+      candidates = candidates.concat(extra);
+    }
+  }
+  const wantCompact = want.replace(/-/g, "").replace(/\s+/g, "");
+  const scored: { code: string; score: number; n: number }[] = [];
+  for (const c of candidates) {
+    const name = (c.name as string) ?? "";
+    const n = (c.n as number) ?? 0;
+    const nameCompact = name.replace(/-/g, "").replace(/\s+/g, "");
+    let score = 0;
+    if (name === want || nameCompact === wantCompact) score = 3;
+    else if (want.startsWith(name) || name.startsWith(want)) score = 2;
+    else if (
+      nameCompact.includes(wantCompact.slice(0, 10)) ||
+      wantCompact.includes(nameCompact.slice(0, 10))
+    )
+      score = 1;
+    if (score > 0) scored.push({ code: c.code as string, n, score });
+  }
+  scored.sort((a, b) => b.score - a.score || b.n - a.n);
+  const out: string[] = [];
+  for (const s of scored) {
+    if (!out.includes(s.code)) out.push(s.code);
+    if (out.length >= 3) break;
+  }
+  return out;
 }
 
 /**
  * Убрать цены-заглушки.
+
  *
  * Часть аптек вместо «цены по запросу» ставит единицу или десятку: в базе
  * лежит «Диспорт за 1 тенге» при настоящей цене 72 тысячи. Показать такую
@@ -528,7 +672,24 @@ function searchAttempts(term: string): [string, boolean][] {
   const words = term.split(/[\s.]+/).filter((w) => w.length >= 4);
   const longest = words.sort((a, b) => b.length - a.length)[0];
 
+  // Ручные алиасы: как пишут в назначении vs как лежит в прайсе.
+  const ALIASES: Record<string, string[]> = {
+    олигоцинк: ["олиго цинк"],
+    санпласт: ["санипласт"],
+    sanplast: ["санипласт"],
+    сейфгард: ["safeguard"],
+    сейфгардсромашкой: ["safeguard"],
+    уголь: ["уголь активированный"],
+    активируголь: ["уголь активированный"],
+    активированныйуголь: ["уголь активированный"],
+  };
+
   const out: [string, boolean][] = [[term, false]];
+  for (const a of ALIASES[compact] ?? []) {
+    out.push([a, false]);
+    const ac = a.replace(/[-\s.]/g, "");
+    if (ac !== a) out.push([ac, true]);
+  }
   if (compact !== term) out.push([compact, true]);
   const head = term.split(/[\s.]+/)[0];
   if (head.length >= 3 && head !== term) out.push([head, false]);

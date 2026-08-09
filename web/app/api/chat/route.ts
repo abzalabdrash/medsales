@@ -31,6 +31,8 @@ type Body = {
   locale?: string;
   /** Фото назначения как data: URL. Разбирается до начала диалога. */
   image?: string;
+  /** Адрес из кабинета (localStorage): считает «рядом» для маршрута. */
+  address?: { label: string; lat: number; lng: number } | null;
 };
 
 type Event =
@@ -113,14 +115,16 @@ function extractLeakedCalls(text: string): {
 
 /** Подписи для строки состояния: человек видит, чем занят помощник. */
 const TOOL_STATUS: Record<string, string> = {
-  find_drug: "ищу препарат в каталоге",
-  drug_prices_by_pharmacy: "сравниваю цены по аптекам",
-  find_analogs: "смотрю аналоги по действующему веществу",
-  check_free_coverage: "проверяю, положено ли бесплатно",
-  compute_course: "считаю, сколько упаковок нужно на курс",
-  find_service: "ищу услугу в клиниках",
+  find_drug: "ищу в каталоге",
+  drug_prices_by_pharmacy: "сверяю цены",
+  find_analogs: "смотрю аналоги",
+  check_free_coverage: "проверяю льготы",
+  compute_course: "считаю курс",
+  build_shopping_route: "строю маршрут",
+  find_service: "ищу в клиниках",
   list_pharmacies: "подбираю аптеки",
-  get_drug: "открываю карточку препарата",
+  get_drug: "открываю карточку",
+  place_reviews: "читаю отзывы",
 };
 
 export async function POST(req: Request) {
@@ -134,6 +138,17 @@ export async function POST(req: Request) {
   const city = resolveCity(payload.city);
   const cityName = CITIES.find((c) => c.slug === city)?.name ?? city;
   const history = (payload.messages ?? []).slice(-10);
+  const near =
+    payload.address &&
+    typeof payload.address.label === "string" &&
+    Number.isFinite(payload.address.lat) &&
+    Number.isFinite(payload.address.lng)
+      ? {
+          label: payload.address.label,
+          lat: payload.address.lat,
+          lng: payload.address.lng,
+        }
+      : null;
 
   if (!llmConfigured()) {
     return json({
@@ -149,8 +164,10 @@ export async function POST(req: Request) {
         controller.enqueue(enc.encode(JSON.stringify(e) + "\n"));
 
       try {
+        let drugCardsEmitted = 0;
+        let routeEmitted = false;
         const messages: ChatMessage[] = [
-          { role: "system", content: systemPrompt(city, cityName) },
+          { role: "system", content: systemPrompt(city, cityName, near) },
         ];
 
         // --- фото назначения разбираем до диалога -------------------------
@@ -255,6 +272,13 @@ export async function POST(req: Request) {
               args = {};
             }
             if (!args.city) args.city = city;
+            // Адрес человека подмешиваем в маршрут: модель координаты не
+            // знает, а buildBasket считает близость по ним.
+            if (near) {
+              args.nearLat = near.lat;
+              args.nearLng = near.lng;
+              args.nearLabel = near.label;
+            }
             // Ссылки в карточках должны вести в тот же город, в котором
             // инструмент искал. Иначе на вопрос про Астану приходят цены
             // Астаны, а ссылка открывает страницу с ценами Алматы.
@@ -263,11 +287,22 @@ export async function POST(req: Request) {
             const result = runTool(call.function.name, args);
             const cards =
               call.function.name === "compute_course"
-                ? courseCard(result)
+                ? courseCard(result, args)
                 : call.function.name === "build_shopping_route"
                   ? routeCard(result)
                   : cardsFrom(call.function.name, args, result, usedCity);
-            for (const card of cards) send({ t: "card", v: card });
+            // Бюджет: не больше 8 drug-карточек за весь ответ.
+            for (const card of cards) {
+              if (card.kind === "drug") {
+                drugCardsEmitted += 1;
+                if (drugCardsEmitted > 8) continue;
+              }
+              if (routeEmitted && (card.kind === "drug" || card.kind === "pharmacyPrice")) {
+                continue;
+              }
+              if (card.kind === "route") routeEmitted = true;
+              send({ t: "card", v: card });
+            }
 
             messages.push({
               role: "tool",
@@ -281,10 +316,15 @@ export async function POST(req: Request) {
 
         send({ t: "done" });
       } catch (e) {
-        send({
-          t: "error",
-          v: e instanceof Error ? e.message : "не удалось получить ответ",
-        });
+        const raw = e instanceof Error ? e.message : "не удалось получить ответ";
+        const low = raw.toLowerCase();
+        const v =
+          low.includes("quota") || low.includes("insufficient") || low.includes("баланс")
+            ? "У API-ключа закончился баланс у провайдера модели. Пополните счет или обновите API_KEYS в Vercel."
+            : low.includes("all keys") || low.includes("все ключи")
+              ? "Все API-ключи недоступны. Проверьте API_KEYS и баланс."
+              : raw;
+        send({ t: "error", v });
       } finally {
         controller.close();
       }
@@ -308,15 +348,16 @@ export async function POST(req: Request) {
  */
 async function readPrescription(dataUrl: string): Promise<PrescriptionItem[] | null> {
   const { text } = await complete({
-    // Фото читает более сильная модель: ошибку в названии препарата не
-    // поймает ни один инструмент, она уедет в неверную цену и неверный курс.
+    // OCR: Gemini 3.1 Pro (Clodex). Агент с tools остаётся на Sol.
     model: llmSettings().visionModel,
+    // Для буквального чтения reasoning не нужен — только тормозит.
+    reasoningEffort: fromEnvVisionEffort(),
     messages: [
       { role: "system", content: VISION_PROMPT },
       {
         role: "user",
         content: [
-          { type: "text", text: "Прочитай назначение и верни позиции в JSON." },
+          { type: "text", text: "Прочитай назначение буква в букву и верни позиции в JSON." },
           { type: "image_url", image_url: { url: dataUrl } },
         ],
       },
@@ -331,6 +372,10 @@ async function readPrescription(dataUrl: string): Promise<PrescriptionItem[] | n
   } catch {
     return null;
   }
+}
+
+function fromEnvVisionEffort(): string {
+  return process.env.LLM_VISION_REASONING_EFFORT || "low";
 }
 
 function json(e: Event): Response {

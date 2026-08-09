@@ -60,6 +60,8 @@ export type FreeCardData = {
 
 export type CourseCardData = {
   kind: "course";
+  /** Название препарата, чтобы при нескольких курсах было понятно чей расчёт. */
+  title: string | null;
   units: number | null;
   packs: number | null;
   leftover: number | null;
@@ -91,6 +93,9 @@ export type RouteCardData = {
   cheapestTotal: number;
   oneStopTotal: number | null;
   oneStopName: string | null;
+  oneStopAddress: string | null;
+  oneStopDistanceKm: number | null;
+  oneStopRating: number | null;
   missing: string[];
   stops: {
     pharmacy: string;
@@ -98,6 +103,8 @@ export type RouteCardData = {
     phone: string | null;
     hours: string | null;
     twogisUrl: string | null;
+    rating: number | null;
+    distanceKm: number | null;
     subtotal: number;
     lines: { title: string; packs: number; pricePerPack: number; subtotal: number }[];
   }[];
@@ -153,7 +160,8 @@ export function cardsFrom(
 
   switch (tool) {
     case "find_drug":
-      return items.slice(0, 6).map((x) => ({
+      // На рецепте 7+ позиций: 6 карточек на каждую = лента из 40.
+      return items.slice(0, 1).map((x) => ({
         kind: "drug" as const,
         offerId: String(x.offerId ?? ""),
         href: `/lekarstvo/${String(x.offerId ?? "")}?city=${city}`,
@@ -168,29 +176,8 @@ export function cardsFrom(
       }));
 
     case "drug_prices_by_pharmacy":
-      return [
-        {
-          kind: "pharmacyPrice",
-          title: String(args.title ?? "Цены по аптекам"),
-          city,
-          cheapest: n(result.cheapest),
-          priciest: n(result.priciest),
-          shown: items.length,
-          storesTotal: n(result.storesTotal),
-          rows: items.map((x) => ({
-            pharmacy: String(x.pharmacy ?? ""),
-            address: s(x.address),
-            phone: s(x.phone),
-            hours: s(x.hours),
-            price: n(x.price) ?? 0,
-            packSize: n(x.packSize),
-            updated: s(x.updated),
-            twogisUrl: s(x.twogisUrl),
-            rating: n(x.rating),
-            reviews: n(x.reviews),
-          })),
-        },
-      ];
+      // Маршрут уже показывает где брать — отдельная таблица цен = шум.
+      return [];
 
     case "check_free_coverage":
       return [
@@ -208,7 +195,7 @@ export function cardsFrom(
       ];
 
     case "find_analogs":
-      return items.slice(0, 6).map((x) => ({
+      return items.slice(0, 2).map((x) => ({
         kind: "drug" as const,
         offerId: String(x.offerId ?? ""),
         href: `/lekarstvo/${String(x.offerId ?? "")}?city=${city}`,
@@ -287,6 +274,9 @@ export function routeCard(result: Record<string, unknown>): Card[] {
       cheapestTotal: n(result.cheapestTotal) ?? 0,
       oneStopTotal: n(result.oneStopTotal),
       oneStopName: s(result.oneStopName),
+      oneStopAddress: s(result.oneStopAddress),
+      oneStopDistanceKm: n(result.oneStopDistanceKm),
+      oneStopRating: n(result.oneStopRating),
       missing: Array.isArray(result.missing) ? (result.missing as string[]) : [],
       stops: stops.map((st) => ({
         pharmacy: String(st.pharmacy ?? ""),
@@ -294,6 +284,8 @@ export function routeCard(result: Record<string, unknown>): Card[] {
         phone: s(st.phone),
         hours: s(st.hours),
         twogisUrl: s(st.twogisUrl),
+        rating: n(st.rating),
+        distanceKm: n(st.distanceKm),
         subtotal: n(st.subtotal) ?? 0,
         lines: ((st.lines as Row[]) ?? []).map((l) => ({
           title: String(l.title ?? ""),
@@ -307,11 +299,17 @@ export function routeCard(result: Record<string, unknown>): Card[] {
 }
 
 /** compute_course отдаёт не список, а один расчёт, поэтому отдельно. */
-export function courseCard(result: Record<string, unknown>): Card[] {
+export function courseCard(
+  result: Record<string, unknown>,
+  args: Record<string, unknown> = {},
+): Card[] {
   if (result.error || result.explainer === undefined) return [];
+  const title =
+    s(args.title) || s(args.name) || s(args.drug) || s(result.title) || null;
   return [
     {
       kind: "course",
+      title,
       units: n(result.units),
       packs: n(result.packs),
       leftover: n(result.leftover),

@@ -217,6 +217,10 @@ export type Dict = {
   categories: string;
   chooseCity: string;
   heroSubtitle: string;
+  assistantCoreEyebrow: string;
+  assistantCoreTitle: string;
+  assistantCoreBody: string;
+  assistantCoreCta: string;
   statPrices: string;
   statClinics: string;
   statCities: string;
@@ -360,7 +364,7 @@ export type Dict = {
 
 const DICT: Record<Locale, Dict> = {
   ru: {
-    metaTitle: "MedPrice.kz — сравнение цен на медуслуги в Казахстане",
+    metaTitle: "MedSales — сравнение цен на медуслуги в Казахстане",
     metaDescription:
       "Найдите анализ, приём врача или диагностику и сравните цены в клиниках вашего города.",
     searchPlaceholder: "Найдите анализ, приём врача или услугу",
@@ -378,7 +382,12 @@ const DICT: Record<Locale, Dict> = {
     categories: "Категории",
     chooseCity: "Выбор города",
     heroSubtitle:
-      "Анализы, приём врача, диагностика и процедуры. Дешёвые предложения сверху, с адресом и рейтингом.",
+      "Сравните цены на услуги в клиниках. А если есть назначение врача, ИИ-помощник ниже соберёт маршрут по аптекам рядом.",
+    assistantCoreEyebrow: "Ядро MedSales",
+    assistantCoreTitle: "ИИ-помощник по назначению",
+    assistantCoreBody:
+      "Сфотографируйте рецепт: найдём, где купить дешевле рядом, посчитаем курс и проверим бесплатное обеспечение.",
+    assistantCoreCta: "Открыть помощника",
     statPrices: "цен",
     statClinics: "клиник",
     statCities: "городов",
@@ -437,7 +446,7 @@ const DICT: Record<Locale, Dict> = {
     historyMinTitle: "История минимальной цены",
     nowPrice: "сейчас",
     chartAria: "График минимальной цены по дням",
-    logoAria: "MedPrice — на главную",
+    logoAria: "MedSales — на главную",
     crumbsAria: "Хлебные крошки",
     picksTitle: "Быстрый выбор",
     pickCheapest: "Самый дешёвый",
@@ -493,7 +502,7 @@ const DICT: Record<Locale, Dict> = {
     addressNotFound: "Адрес не найден. Уточните написание.",
     addressClear: "Удалить адрес",
     addressHint:
-      "Адрес хранится только в вашем браузере и нужен для подсказки «ближайший».",
+      "Постоянный адрес по желанию. Для подбора аптек рядом в Помощнике достаточно один раз нажать «Поделиться геопозицией» — координаты не обязаны храниться здесь.",
     addressMine: "Мой адрес сохранён",
     cancel: "Отмена",
     save: "Сохранить",
@@ -520,7 +529,7 @@ const DICT: Record<Locale, Dict> = {
     loginToWatch: "Войдите, чтобы следить за ценой",
   },
   kk: {
-    metaTitle: "MedPrice.kz — Қазақстандағы медқызмет бағаларын салыстыру",
+    metaTitle: "MedSales — Қазақстандағы медқызмет бағаларын салыстыру",
     metaDescription:
       "Талдау, дәрігер қабылдауын немесе диагностиканы тауып, қалаңыздағы клиникалардың бағаларын салыстырыңыз.",
     searchPlaceholder: "Талдау, дәрігер қабылдауын немесе қызметті табыңыз",
@@ -538,7 +547,12 @@ const DICT: Record<Locale, Dict> = {
     categories: "Санаттар",
     chooseCity: "Қаланы таңдау",
     heroSubtitle:
-      "Талдаулар, дәрігер қабылдауы, диагностика және процедуралар. Арзан ұсыныстар жоғарыда — мекенжайы мен рейтингімен.",
+      "Клиникадағы қызмет бағаларын салыстырыңыз. Дәрігер тағайындауы болса, төмендегі ЖИ-көмекші жақын жердегі дәріханалар маршрутын жинайды.",
+    assistantCoreEyebrow: "MedSales өзегі",
+    assistantCoreTitle: "Тағайындау бойынша ЖИ-көмекші",
+    assistantCoreBody:
+      "Рецептті суретке түсіріңіз: жақын жерден арзанырақ сатып алуды табамыз, курсты есептейміз және тегін қамтуды тексереміз.",
+    assistantCoreCta: "Көмекшіні ашу",
     statPrices: "баға",
     statClinics: "клиника",
     statCities: "қала",
@@ -596,7 +610,7 @@ const DICT: Record<Locale, Dict> = {
     historyMinTitle: "Ең төмен баға тарихы",
     nowPrice: "қазір",
     chartAria: "Күндер бойынша ең төмен баға графигі",
-    logoAria: "MedPrice — басты бет",
+    logoAria: "MedSales — басты бет",
     crumbsAria: "Навигация",
     picksTitle: "Жылдам таңдау",
     pickCheapest: "Ең арзаны",
@@ -652,7 +666,7 @@ const DICT: Record<Locale, Dict> = {
     addressNotFound: "Мекенжай табылмады. Жазылуын тексеріңіз.",
     addressClear: "Мекенжайды жою",
     addressHint:
-      "Мекенжай тек браузеріңізде сақталады және «жақын» ұсынысы үшін қажет.",
+      "Тұрақты мекенжай міндетті емес. Жақын дәріханалар үшін Көмекшіде «Геолокацияны бөлісу» жеткілікті — мұнда сақтау міндетті емес.",
     addressMine: "Мекенжайым сақталды",
     cancel: "Бас тарту",
     save: "Сақтау",
@@ -703,7 +717,7 @@ export const CHAT_T: Record<
   }
 > = {
   ru: {
-    title: "Помощник MedPrice",
+    title: "Помощник MedSales",
     button: "Помощник",
     placeholder: "Спросите про услугу или цену…",
     greeting:
@@ -718,7 +732,7 @@ export const CHAT_T: Record<
     close: "Закрыть",
   },
   kk: {
-    title: "MedPrice көмекшісі",
+    title: "MedSales көмекшісі",
     button: "Көмекші",
     placeholder: "Қызмет немесе баға туралы сұраңыз…",
     greeting:

@@ -3,7 +3,7 @@ import { AgentConsole } from "@/components/agent/AgentConsole";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Помощник — MedPrice.kz",
+  title: "Помощник — MedSales",
   description:
     "Покажите назначение врача, найдем, где купить дешевле рядом, и посчитаем курс",
 };

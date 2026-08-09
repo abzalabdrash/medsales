@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { PickCandidate } from "./picks";
 
@@ -9,17 +10,25 @@ let _db: DatabaseSync | null = null;
 // opening a second connection to the same file.
 export function db(): DatabaseSync {
   if (!_db) {
-    // Accepts MEDPRICE_DB (raw path) or MEDPRICE_DB_URL (sqlite:///data/medprice.db).
-    // Relative paths resolve against the project root (one level up from web/).
+    // Accepts MEDPRICE_DB (raw path) or MEDPRICE_DB_URL (sqlite:///data/medsales.db).
+    // Tries several locations so local (repo/data) and Vercel (web/data) both work.
     const url = process.env.MEDPRICE_DB_URL || "";
     const fromUrl = url ? url.replace(/^sqlite:\/+/i, "") : "";
-    const p = process.env.MEDPRICE_DB
-      ? process.env.MEDPRICE_DB
-      : fromUrl
-        ? path.isAbsolute(fromUrl)
-          ? fromUrl
-          : path.resolve(process.cwd(), "..", fromUrl)
-        : path.resolve(process.cwd(), "..", "data", "medsales.db");
+    const candidates: string[] = [];
+    if (process.env.MEDPRICE_DB) candidates.push(process.env.MEDPRICE_DB);
+    if (fromUrl) {
+      candidates.push(
+        path.isAbsolute(fromUrl) ? fromUrl : path.resolve(process.cwd(), fromUrl),
+      );
+      candidates.push(path.resolve(process.cwd(), "..", fromUrl));
+    }
+    candidates.push(
+      path.resolve(process.cwd(), "data", "medsales.db"),
+      path.resolve(process.cwd(), "..", "data", "medsales.db"),
+    );
+    const p =
+      candidates.find((c) => c && existsSync(c)) ??
+      candidates[candidates.length - 1];
     _db = new DatabaseSync(p, { readOnly: true });
   }
   return _db;

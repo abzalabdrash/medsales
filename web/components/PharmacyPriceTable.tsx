@@ -5,14 +5,8 @@ import { tenge } from "@/lib/format";
 /**
  * Цены на препарат по конкретным аптекам, от дешёвой к дорогой.
  *
- * Это ответ на вопрос, ради которого человек и заходит: не «сколько стоит
- * вообще», а «куда идти, чтобы не переплатить». Разница между первой и
- * последней строкой обычно и есть та экономия, которую обещает сервис.
- *
- * Три вещи показываем честно, потому что иначе таблица врёт:
- *   — фасовку рядом с ценой: 5 500 ₸ за 21 капсулу и за 42 это разные цены;
- *   — дату обновления у каждой строки: прайсы аптеки грузят сами;
- *   — сколько аптек в выдаче из скольких всего.
+ * Ссылка только на карточку фирмы 2GIS (/firm/id). Поиск по строке адреса
+ * даёт «точных совпадений нет» и открывает что попало — так нельзя.
  */
 export function PharmacyPriceTable({
   rows,
@@ -27,6 +21,11 @@ export function PharmacyPriceTable({
   const max = rows[rows.length - 1].price;
   const total = rows.find((r) => r.storesTotal)?.storesTotal ?? null;
   const save = max > min ? max - min : null;
+
+  function firmHref(r: PharmacyPrice): string | null {
+    if (r.twogisUrl && /\/firm\//.test(r.twogisUrl)) return r.twogisUrl;
+    return null;
+  }
 
   return (
     <section className="mt-10">
@@ -44,7 +43,8 @@ export function PharmacyPriceTable({
             Показаны {rows.length} из {total} аптек: самые дешёвые.{" "}
           </>
         ) : null}
-        Наличие уточняйте по телефону — прайсы аптеки обновляют сами.
+        Нажмите на название — откроется карточка аптеки в 2GIS. Наличие
+        уточняйте по телефону.
       </p>
 
       <div className="mt-4 overflow-x-auto">
@@ -58,41 +58,58 @@ export function PharmacyPriceTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-b border-line/60 last:border-0">
-                <td className="py-2.5 pr-3">
-                  <span className="font-medium text-ink">{r.pharmacyName}</span>
-                  {r.address && (
-                    <a
-                      href={r.twogisUrl ?? undefined}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-0.5 flex items-start gap-1.5 text-xs text-muted hover:text-brand-ink"
-                    >
-                      <MapPin size={12} className="mt-0.5 shrink-0" aria-hidden />
-                      <span>{r.address}</span>
-                    </a>
-                  )}
-                </td>
-                <td className="py-2.5 pr-3 text-xs text-muted">
-                  {r.packSize ? `${r.packSize} шт.` : "—"}
-                  {r.dosage && <div>{r.dosage}</div>}
-                </td>
-                <td className="py-2.5 pr-3 text-xs text-muted">
-                  {r.updatedLabel ?? "—"}
-                </td>
-                <td className="py-2.5 text-right font-semibold tabular-nums text-ink">
-                  {tenge(r.price)}
-                </td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const href = firmHref(r);
+              const nameEl = (
+                <span className={href ? "font-medium text-ink group-hover:text-brand-ink group-hover:underline" : "font-medium text-ink"}>
+                  {r.pharmacyName}
+                </span>
+              );
+              return (
+                <tr key={r.id} className="border-b border-line/60 last:border-0">
+                  <td className="py-2.5 pr-3">
+                    {href ? (
+                      <a href={href} target="_blank" rel="noopener noreferrer" className="group block">
+                        {nameEl}
+                        {r.address && (
+                          <span className="mt-0.5 flex items-start gap-1.5 text-xs text-muted">
+                            <MapPin size={12} className="mt-0.5 shrink-0" aria-hidden />
+                            <span>{r.address}</span>
+                          </span>
+                        )}
+                      </a>
+                    ) : (
+                      <div>
+                        {nameEl}
+                        {r.address && (
+                          <span className="mt-0.5 flex items-start gap-1.5 text-xs text-muted">
+                            <MapPin size={12} className="mt-0.5 shrink-0" aria-hidden />
+                            <span>{r.address}</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-2.5 pr-3 text-xs text-muted">
+                    {r.packSize ? `${r.packSize} шт.` : "—"}
+                    {r.dosage && <div>{r.dosage}</div>}
+                  </td>
+                  <td className="py-2.5 pr-3 text-xs text-muted">
+                    {r.updatedLabel ?? "—"}
+                  </td>
+                  <td className="py-2.5 text-right font-semibold tabular-nums text-ink">
+                    {tenge(r.price)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       <p className="mt-3 text-xs text-muted">
-        Источник цен — агрегатор apteka.103.kz, {city}. Аптеки публикуют прайсы
-        сами, поэтому у каждой строки своя дата.
+        Источник цен — агрегатор apteka.103.kz и сети, {city}. Карточки 2GIS —
+        по id организации из справочника Places API.
       </p>
     </section>
   );

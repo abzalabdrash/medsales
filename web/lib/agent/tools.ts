@@ -262,6 +262,7 @@ export const TOOLS: ToolDef[] = [
         timesPerDay: { type: "number" },
         days: { type: "integer" },
         pricePerPack: { type: "number", description: "если передать — вернём стоимость курса" },
+        title: { type: "string", description: "название препарата для подписи расчёта" },
       },
     },
     run: (a) => {
@@ -275,6 +276,7 @@ export const TOOLS: ToolDef[] = [
       });
       const price = num(pick(a, "pricePerPack", "price", "packPrice"));
       return {
+        title: str(pick(a, "title", "name", "drug")) || null,
         units: r.units,
         packs: r.packs,
         leftover: r.leftover,
@@ -429,14 +431,21 @@ export const TOOLS: ToolDef[] = [
         }));
       if (items.length === 0) return empty("позиции для маршрута не переданы");
 
-      const basket = buildBasket(items, resolveCity(str(a.city)));
+      const near =
+        Number.isFinite(Number(a.nearLat)) && Number.isFinite(Number(a.nearLng))
+          ? {
+              lat: Number(a.nearLat),
+              lng: Number(a.nearLng),
+              label: str(a.nearLabel) || null,
+            }
+          : null;
+      const basket = buildBasket(items, resolveCity(str(a.city)), { near });
       if (basket.stops.length === 0) {
         return { found: 0, items: [], missing: basket.missing, note: "ни одной позиции нет в базе" };
       }
-      return { ...basket, found: basket.stops.length };
+      return { ...basket, found: basket.stops.length, nearLabel: near?.label ?? null };
     },
   },
-
   {
     name: "list_pharmacies",
     description:

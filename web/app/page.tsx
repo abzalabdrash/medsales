@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Sparkles, ChevronRight } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { resolveCity, CITIES } from "@/lib/cities";
 import { withCity } from "@/lib/url";
 import { getPopularServices, getCategoryCounts, getTotals } from "@/lib/db";
@@ -43,24 +43,31 @@ export default async function Home({
           <SearchBox city={city} variant="hero" initialPopular={popular} />
         </div>
 
-        {/* Вход в помощника рядом с поиском, а не поверх страницы.
-            Поиск отвечает на «сколько стоит», помощник на «что мне со всем
-            этим делать»: это разные вопросы, и оба должны быть видны сразу. */}
-        <Link
-          href={withCity("/pomoshnik", city)}
-          className="pressable mt-3 flex items-center gap-3 rounded-2xl border border-brand/30 bg-brand-wash px-4 py-3.5 text-left transition hover:border-brand/50"
-        >
-          <Sparkles size={22} className="shrink-0 text-brand-ink" aria-hidden />
-          <span className="min-w-0 flex-1">
-            <span className="block font-semibold text-ink">
-              Сфотографируйте назначение врача
+        {/* Ядро продукта по ТЗ хакатона: ИИ в основной функции, не в подвале. */}
+        <div className="mt-5 rounded-3xl border border-brand/40 bg-gradient-to-b from-brand-wash to-paper p-5 text-left shadow-sm sm:p-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand-ink">
+            {t.assistantCoreEyebrow}
+          </p>
+          <div className="mt-2 flex items-start gap-3">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand text-white">
+              <Sparkles size={22} aria-hidden />
             </span>
-            <span className="block text-sm text-muted">
-              Помощник найдёт, где купить дешевле рядом, и посчитает курс
-            </span>
-          </span>
-          <ChevronRight size={18} className="shrink-0 text-brand-ink" aria-hidden />
-        </Link>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-xl font-bold tracking-tight text-ink sm:text-2xl">
+                {t.assistantCoreTitle}
+              </h2>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted sm:text-base">
+                {t.assistantCoreBody}
+              </p>
+            </div>
+          </div>
+          <Link
+            href={withCity("/pomoshnik", city)}
+            className="pressable mt-5 inline-flex min-h-[48px] w-full items-center justify-center rounded-2xl bg-brand px-5 text-base font-semibold text-white sm:w-auto"
+          >
+            {t.assistantCoreCta}
+          </Link>
+        </div>
       </section>
 
       <section className="mt-10">

@@ -76,8 +76,9 @@ export function llmSettings(): LLMSettings {
       .filter(Boolean),
     baseUrl: fromEnv("LLM_BASE_URL") || "https://clodex.xyz/v1",
     model: fromEnv("LLM_MODEL") || "gpt-5.6-sol",
-    visionModel: fromEnv("LLM_VISION_MODEL") || "gpt-5.6-sol",
-    reasoningEffort: fromEnv("LLM_REASONING_EFFORT") || "high",
+    // OCR рукописи: Gemini 3.1 Pro через тот же Clodex. Sol — агент с tools.
+    visionModel: fromEnv("LLM_VISION_MODEL") || "gemini-3.1-pro",
+    reasoningEffort: fromEnv("LLM_REASONING_EFFORT") || "medium",
     timeoutMs: Number(fromEnv("LLM_TIMEOUT_MS")) || 300000,
   };
 }
