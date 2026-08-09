@@ -1,4 +1,7 @@
+import Link from "next/link";
+import { Sparkles, ChevronRight } from "lucide-react";
 import { resolveCity, CITIES } from "@/lib/cities";
+import { withCity } from "@/lib/url";
 import { getPopularServices, getCategoryCounts, getTotals } from "@/lib/db";
 import { getDict, cityNameL, heroTitle } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
@@ -39,6 +42,25 @@ export default async function Home({
         <div className="mt-6 text-left">
           <SearchBox city={city} variant="hero" initialPopular={popular} />
         </div>
+
+        {/* Вход в помощника рядом с поиском, а не поверх страницы.
+            Поиск отвечает на «сколько стоит», помощник на «что мне со всем
+            этим делать»: это разные вопросы, и оба должны быть видны сразу. */}
+        <Link
+          href={withCity("/pomoshnik", city)}
+          className="pressable mt-3 flex items-center gap-3 rounded-2xl border border-brand/30 bg-brand-wash px-4 py-3.5 text-left transition hover:border-brand/50"
+        >
+          <Sparkles size={22} className="shrink-0 text-brand-ink" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="block font-semibold text-ink">
+              Сфотографируйте назначение врача
+            </span>
+            <span className="block text-sm text-muted">
+              Помощник найдёт, где купить дешевле рядом, и посчитает курс
+            </span>
+          </span>
+          <ChevronRight size={18} className="shrink-0 text-brand-ink" aria-hidden />
+        </Link>
       </section>
 
       <section className="mt-10">

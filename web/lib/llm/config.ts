@@ -11,6 +11,8 @@ export type LLMSettings = {
   apiKeys: string[];
   baseUrl: string;
   model: string;
+  /** Модель для чтения фото назначения, см. комментарий у llmSettings. */
+  visionModel: string;
   reasoningEffort: string;
   timeoutMs: number;
 };
@@ -49,6 +51,23 @@ function fromEnv(name: string): string {
   return process.env[name] || rootEnv()[name] || "";
 }
 
+/**
+ * Обе задачи на Sol.
+ *
+ * Luna дешевле в двадцать пять раз, и на простых вопросах отвечает не хуже.
+ * Но на назначении из девяти позиций она начала писать вызовы инструментов
+ * прозой вместо структурного поля:
+ *
+ *     to=functions.check_free_coverage  (json)
+ *     {"atc":"A11JA", ...}
+ *
+ * Для человека это мусор посреди ответа, а работа при этом не делается.
+ * Страховка от такого в маршруте есть (extractLeakedCalls), но полагаться на
+ * неё как на основной механизм нельзя. Sol проходит тот же сценарий без
+ * единого срыва.
+ *
+ * Вернуть Luna это одна строка в .env: LLM_MODEL=gpt-5.6-luna
+ */
 export function llmSettings(): LLMSettings {
   return {
     apiKeys: fromEnv("API_KEYS")
@@ -57,6 +76,7 @@ export function llmSettings(): LLMSettings {
       .filter(Boolean),
     baseUrl: fromEnv("LLM_BASE_URL") || "https://clodex.xyz/v1",
     model: fromEnv("LLM_MODEL") || "gpt-5.6-sol",
+    visionModel: fromEnv("LLM_VISION_MODEL") || "gpt-5.6-sol",
     reasoningEffort: fromEnv("LLM_REASONING_EFFORT") || "high",
     timeoutMs: Number(fromEnv("LLM_TIMEOUT_MS")) || 300000,
   };

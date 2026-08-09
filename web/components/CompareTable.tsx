@@ -253,19 +253,8 @@ export function CompareTable({
                   )}
                 </tr>
               )}
-              {/* updated */}
-              <tr className="border-b border-line">
-                <td className={th}>{t.rowUpdated}</td>
-                {items.map((c) =>
-                  cell(
-                    days(c.parsedAt) === freshest,
-                    <span className="text-sm text-muted">
-                      {freshness(locale, c.parsedAt).label}
-                    </span>,
-                    c.brandId,
-                  ),
-                )}
-              </tr>
+              {/* Строка с датой обхода скрыта до следующего обновления
+                  прайсов клиник, см. FreshnessBadge. */}
               {/* actions */}
               <tr className="border-b border-line">
                 <td className={th}>{t.rowActions}</td>

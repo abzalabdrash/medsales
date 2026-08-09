@@ -161,15 +161,20 @@ export function searchDrugs(q: string, limit = 40): DrugDetail[] {
   const term = normalizeName(q);
   if (term.length < 2) return [];
   const like = `%${term}%`;
+  // Сжатая форма нужна и здесь: в назначении «Олигоцинк», а на витрине
+  // «Олиго Цинк №270». Через пробел эти строки не сходятся.
+  const compact = `%${term.replace(/[-\s.]/g, "")}%`;
+  const C = (col: string) => `REPLACE(REPLACE(REPLACE(${col}, '-', ''), ' ', ''), '.', '')`;
   const rows = db()
     .prepare(
       `${LIST_SELECT}
        WHERE o.price_kzt > 0
-         AND (o.name_norm LIKE ? OR r.tn_norm LIKE ? OR r.inn_norm LIKE ?)
+         AND (o.name_norm LIKE ? OR r.tn_norm LIKE ? OR r.inn_norm LIKE ?
+              OR ${C("o.name_norm")} LIKE ? OR ${C("r.tn_norm")} LIKE ?)
        ORDER BY (COALESCE(r.tn_norm, o.name_norm) LIKE ?) DESC, o.price_kzt ASC
        LIMIT ?`,
     )
-    .all(like, like, like, `${term}%`, limit) as Raw[];
+    .all(like, like, like, compact, compact, `${term}%`, limit) as Raw[];
   return rows.map(shape);
 }
 
@@ -185,38 +190,54 @@ export function searchCatalog(q: string, city: string, limit = 8): DrugDetail[] 
   const term = normalizeName(q);
   if (term.length < 2) return [];
 
-  const askAgg = (t: string) =>
+  // Сжатая форма: без пробелов и дефисов. В назначении пишут «Ае-вит», в
+  // каталоге лежит «Аевит», и обычное сравнение их не сводит.
+  const COMPACT = "REPLACE(REPLACE(REPLACE(a.name_norm, '-', ''), ' ', ''), '.', '')";
+
+  const askAgg = (t: string, compact = false) =>
     db()
       .prepare(
         `${AGG_SELECT}
          WHERE a.city = ? AND a.price_min > 0
-           AND (a.name_norm LIKE ? OR a.inn_norm LIKE ?)
+           AND (${compact ? `${COMPACT} LIKE ?` : "a.name_norm LIKE ?"} OR a.inn_norm LIKE ?)
          ORDER BY (a.name_norm LIKE ?) DESC, a.price_min ASC
          LIMIT ?`,
       )
       .all(city, `%${t}%`, `%${t}%`, `${t}%`, limit) as Raw[];
 
-  // У агрегатора дозировка лежит отдельной колонкой, в названии её нет:
-  // товар записан как «Орсотен», а не «Орсотен 120 мг №21». Поэтому запрос
-  // с дозировкой по полному тексту не находится, хотя товар есть. Если
-  // полное совпадение пустое, ищем по марочной части, то есть по первому
-  // слову: дозировку и фасовку человек уточнит по карточкам.
-  const head = term.split(" ")[0];
-  let agg = askAgg(term);
-  if (agg.length === 0 && head.length >= 3 && head !== term) agg = askAgg(head);
-
-  const rows = agg.map(shape);
-  if (rows.length >= limit) return rows;
-
-  // Витрина сети добирает то, чего у агрегатора нет: свои SKU со штрихкодами.
-  const seen = new Set(rows.map((r) => normalizeName(r.title)));
-  for (const r of searchDrugs(q, limit)) {
-    if (rows.length >= limit) break;
-    if (seen.has(normalizeName(r.title))) continue;
-    seen.add(normalizeName(r.title));
-    rows.push(r);
+  let agg: Raw[] = [];
+  for (const [t, compact] of searchAttempts(term)) {
+    agg = askAgg(t, compact);
+    if (agg.length > 0) break;
   }
-  return rows;
+
+  // Витрину сетей опрашиваем ВСЕГДА, а не только когда у агрегатора пусто.
+  // Иначе запрос «мыло Safeguard» тонет: у агрегатора находится «мыло
+  // детское», лимит выбран, и настоящий Safeguard из витрины Биосферы уже не
+  // доедет. То же с «олигоцинком»: агрегатор отдаёт цинковую мазь, а
+  // «Витацинк» есть только у сети.
+  const merged: DrugDetail[] = [];
+  const seen = new Set<string>();
+  for (const r of [...agg.map(shape), ...searchDrugs(q, limit)]) {
+    const key = normalizeName(r.title);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(r);
+  }
+
+  // Сначала то, где искомое слово реально стоит в названии: «мыло Safeguard»
+  // важнее «мыла детского», даже если детское дешевле и нашлось первым.
+  const compact = term.replace(/[-\s.]/g, "");
+  const hit = (t: string) => {
+    const n = normalizeName(t);
+    return n.includes(term) || n.replace(/[-\s.]/g, "").includes(compact);
+  };
+  return merged
+    .sort((a, b) => {
+      const d = Number(hit(b.title)) - Number(hit(a.title));
+      return d !== 0 ? d : (a.price ?? Infinity) - (b.price ?? Infinity);
+    })
+    .slice(0, limit);
 }
 
 export function listDrugs(opts: {
@@ -337,6 +358,8 @@ export type PharmacyPrice = {
   updatedLabel: string | null;
   updatedOn: string | null;
   twogisUrl: string | null;
+  rating: number | null;
+  reviews: number | null;
   /** Сколько аптек продаёт позицию всего — источник отдаёт лишь первые. */
   storesTotal: number | null;
 };
@@ -373,7 +396,8 @@ export function pharmacyPrices(
               pharmacy_name AS pharmacyName, address, chain_key AS chain,
               phone, working_hours AS hours, pack_size AS packSize, dosage, producer,
               updated_label AS updatedLabel, updated_on AS updatedOn,
-              twogis_url AS twogisUrl, stores_total AS storesTotal
+              twogis_url AS twogisUrl, stores_total AS storesTotal,
+              rating, reviews_count AS reviews
        FROM v_drug_price
        WHERE product_code = ? AND city = ?
        ORDER BY price_kzt`,
@@ -398,6 +422,8 @@ export function pharmacyPrices(
     updatedOn: (x.updatedOn as string) ?? null,
       twogisUrl: (x.twogisUrl as string) ?? null,
       storesTotal: (x.storesTotal as number) ?? null,
+      rating: (x.rating as number) ?? null,
+      reviews: (x.reviews as number) ?? null,
     }));
 }
 
@@ -482,6 +508,32 @@ function dropPlaceholderPrices(rows: Raw[]): Raw[] {
   const median = prices[Math.floor(prices.length / 2)];
   const floor = median * 0.15;
   return kept.filter((r) => (r.price as number) >= floor);
+}
+
+/**
+ * Попытки поиска, от точной к самой широкой. Возвращает пары
+ * [строка поиска, сравнивать ли в сжатой форме].
+ *
+ * Порядок продиктован тем, как назначения пишут на бумаге:
+ *
+ *   «Ае-вит»                -> в каталоге «Аевит», спасает сжатая форма
+ *   «Активир. уголь»        -> сокращение, спасает самое длинное слово
+ *   «Орсотен 120 мг»        -> дозировка отдельной колонкой, спасает марка
+ *
+ * Каждая следующая попытка шире предыдущей, поэтому первая непустая и есть
+ * самая точная из возможных.
+ */
+function searchAttempts(term: string): [string, boolean][] {
+  const compact = term.replace(/[-\s.]/g, "");
+  const words = term.split(/[\s.]+/).filter((w) => w.length >= 4);
+  const longest = words.sort((a, b) => b.length - a.length)[0];
+
+  const out: [string, boolean][] = [[term, false]];
+  if (compact !== term) out.push([compact, true]);
+  const head = term.split(/[\s.]+/)[0];
+  if (head.length >= 3 && head !== term) out.push([head, false]);
+  if (longest && longest !== head && longest !== term) out.push([longest, false]);
+  return out;
 }
 
 /** Тот же алгоритм, что у `norm_name` в pharma/db.py: регистр, ё, пунктуация. */

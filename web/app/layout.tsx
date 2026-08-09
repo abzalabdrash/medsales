@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import { Golos_Text } from "next/font/google";
-import { Suspense } from "react";
 import "./globals.css";
 import { Header } from "@/components/Header";
 import { I18nProvider } from "@/components/I18nProvider";
-import { ChatWidget } from "@/components/ChatWidget";
 import { getDict } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
 
@@ -31,9 +29,6 @@ export default async function RootLayout({
         <I18nProvider locale={locale}>
           <Header />
           {children}
-          <Suspense fallback={null}>
-            <ChatWidget />
-          </Suspense>
         </I18nProvider>
       </body>
     </html>

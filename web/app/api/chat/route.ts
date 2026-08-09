@@ -1,7 +1,7 @@
 import { complete, streamChat, parseJsonLenient, type ChatMessage } from "@/lib/llm/client";
-import { llmConfigured } from "@/lib/llm/config";
+import { llmConfigured, llmSettings } from "@/lib/llm/config";
 import { runTool, toolDeclarations } from "@/lib/agent/tools";
-import { cardsFrom, courseCard, type Card } from "@/lib/agent/cards";
+import { cardsFrom, courseCard, routeCard, type Card } from "@/lib/agent/cards";
 import { systemPrompt, VISION_PROMPT } from "@/lib/agent/prompts";
 import { resolveCity, CITIES } from "@/lib/cities";
 
@@ -20,7 +20,10 @@ export const maxDuration = 300;
  * появлении цены, адреса и ссылки, поэтому выдумать их она не может.
  */
 
-const MAX_ROUNDS = 6;
+// Назначение на девять позиций требует поиска по каждой, расчёта курса,
+// проверки льгот и сборки маршрута. Шести раундов на это не хватало, и
+// агент бросал работу на середине.
+const MAX_ROUNDS = 12;
 
 type Body = {
   messages?: { role: "user" | "assistant"; content: string }[];
@@ -49,6 +52,64 @@ type PrescriptionItem = {
   confidence?: number | null;
   raw?: string | null;
 };
+
+/**
+ * Вызовы инструментов, утёкшие в текст.
+ *
+ * Luna периодически пишет вызов прозой вместо структурного поля:
+ *
+ *     to=functions.check_free_coverage  (json)
+ *     {"atc":"A11JA","inn":"Ретинол+токоферол"}
+ *
+ * Для человека это мусор посреди ответа, а работа при этом не делается.
+ * Вылавливаем такие куски, превращаем в настоящие вызовы и убираем из
+ * текста. Дешевле, чем менять модель, и помогает любой модели, которая
+ * однажды собьётся так же.
+ */
+const LEAKED_CALL = /to=functions\.([a-z_]+)\s*(?:\([^)]*\))?\s*(\{)/g;
+
+function extractLeakedCalls(text: string): {
+  clean: string;
+  calls: { name: string; args: Record<string, unknown> }[];
+} {
+  const calls: { name: string; args: Record<string, unknown> }[] = [];
+  let clean = "";
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+  LEAKED_CALL.lastIndex = 0;
+
+  while ((m = LEAKED_CALL.exec(text)) !== null) {
+    const braceStart = m.index + m[0].length - 1;
+    // ищем парную закрывающую скобку, считая вложенность
+    let depth = 0;
+    let end = -1;
+    for (let i = braceStart; i < text.length; i++) {
+      if (text[i] === "{") depth += 1;
+      else if (text[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) break;
+    try {
+      calls.push({
+        name: m[1],
+        args: JSON.parse(text.slice(braceStart, end + 1)) as Record<string, unknown>,
+      });
+    } catch {
+      // не разобралось — оставим кусок в тексте, чтобы ничего не потерять
+      continue;
+    }
+    clean += text.slice(cursor, m.index);
+    cursor = end + 1;
+    LEAKED_CALL.lastIndex = cursor;
+  }
+  clean += text.slice(cursor);
+  return { clean: clean.trim(), calls };
+}
 
 /** Подписи для строки состояния: человек видит, чем занят помощник. */
 const TOOL_STATUS: Record<string, string> = {
@@ -134,19 +195,45 @@ export async function POST(req: Request) {
           // склеиваются в «...аптеках.По общему анализу...».
           if (wroteText) send({ t: "text", v: "\n\n" });
 
+          // Текст отдаём потоком, но с задержкой в несколько символов: если в
+          // нём начинается утёкший вызов инструмента, показывать его человеку
+          // нельзя, а понять это можно только увидев начало метки.
+          let flushed = 0;
+          let leaking = false;
+          const HOLD = 16;
+
           for await (const chunk of streamChat({
             messages,
             tools: rounds < MAX_ROUNDS ? tools : undefined,
             signal: req.signal,
           })) {
             if (chunk.kind === "text") {
-              send({ t: "text", v: chunk.delta });
-              wroteText = true;
+              text += chunk.delta;
+              if (!leaking && text.includes("to=functions")) leaking = true;
+              if (!leaking) {
+                const safe = text.length - HOLD;
+                if (safe > flushed) {
+                  send({ t: "text", v: text.slice(flushed, safe) });
+                  flushed = safe;
+                  wroteText = true;
+                }
+              }
             }
-            if (chunk.kind === "done") {
-              text = chunk.text;
-              calls = chunk.calls;
-            }
+            if (chunk.kind === "done") calls = chunk.calls;
+          }
+
+          const { clean, calls: leaked } = extractLeakedCalls(text);
+          if (clean.length > flushed) {
+            send({ t: "text", v: clean.slice(flushed) });
+            wroteText = true;
+          }
+          text = clean;
+          for (const l of leaked) {
+            calls.push({
+              id: `leaked_${calls.length}_${l.name}`,
+              type: "function",
+              function: { name: l.name, arguments: JSON.stringify(l.args) },
+            });
           }
 
           if (calls.length === 0) break;
@@ -177,7 +264,9 @@ export async function POST(req: Request) {
             const cards =
               call.function.name === "compute_course"
                 ? courseCard(result)
-                : cardsFrom(call.function.name, args, result, usedCity);
+                : call.function.name === "build_shopping_route"
+                  ? routeCard(result)
+                  : cardsFrom(call.function.name, args, result, usedCity);
             for (const card of cards) send({ t: "card", v: card });
 
             messages.push({
@@ -219,6 +308,9 @@ export async function POST(req: Request) {
  */
 async function readPrescription(dataUrl: string): Promise<PrescriptionItem[] | null> {
   const { text } = await complete({
+    // Фото читает более сильная модель: ошибку в названии препарата не
+    // поймает ни один инструмент, она уедет в неверную цену и неверный курс.
+    model: llmSettings().visionModel,
     messages: [
       { role: "system", content: VISION_PROMPT },
       {

@@ -41,6 +41,8 @@ export type PharmacyPriceCardData = {
     packSize: number | null;
     updated: string | null;
     twogisUrl: string | null;
+    rating: number | null;
+    reviews: number | null;
   }[];
 };
 
@@ -71,11 +73,39 @@ export type ServiceCardData = {
   title: string;
   href: string;
   rows: {
+    placeId: string;
     clinic: string;
+    branch: string | null;
     address: string | null;
+    phone: string | null;
     price: number | null;
     rating: number | null;
+    reviews: number | null;
+    twogisUrl: string | null;
   }[];
+};
+
+export type RouteCardData = {
+  kind: "route";
+  total: number;
+  cheapestTotal: number;
+  oneStopTotal: number | null;
+  oneStopName: string | null;
+  missing: string[];
+  stops: {
+    pharmacy: string;
+    address: string | null;
+    phone: string | null;
+    hours: string | null;
+    twogisUrl: string | null;
+    subtotal: number;
+    lines: { title: string; packs: number; pricePerPack: number; subtotal: number }[];
+  }[];
+};
+
+export type ReviewsCardData = {
+  kind: "reviews";
+  items: { rating: number | null; text: string; source: string; date: string | null }[];
 };
 
 export type PharmacyCardData = {
@@ -94,7 +124,14 @@ export type Card =
   | FreeCardData
   | CourseCardData
   | ServiceCardData
-  | PharmacyCardData;
+  | PharmacyCardData
+  | RouteCardData
+  | ReviewsCardData;
+
+/** Ссылка на карточку организации в 2GIS: там маршрут, отзывы и телефоны. */
+function twogisFirm(city: string, twogisId: string | null): string | null {
+  return twogisId ? `https://2gis.kz/${city}/firm/${twogisId}` : null;
+}
 
 type Row = Record<string, unknown>;
 const s = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
@@ -149,6 +186,8 @@ export function cardsFrom(
             packSize: n(x.packSize),
             updated: s(x.updated),
             twogisUrl: s(x.twogisUrl),
+            rating: n(x.rating),
+            reviews: n(x.reviews),
           })),
         },
       ];
@@ -192,14 +231,32 @@ export function cardsFrom(
           title: String(svc.name ?? ""),
           href: `/usluga/${String(svc.id ?? "")}?city=${city}`,
           rows: items.slice(0, 6).map((x) => ({
-            clinic: String(x.brand_name ?? x.clinic ?? x.name ?? ""),
+            placeId: String(x.placeId ?? ""),
+            clinic: String(x.clinic ?? ""),
+            branch: s(x.branch),
             address: s(x.address),
-            price: n(x.price_kzt ?? x.price),
+            phone: s(x.phone),
+            price: n(x.price),
             rating: n(x.rating),
+            reviews: n(x.reviews),
+            twogisUrl: twogisFirm(s(x.city) ?? city, s(x.twogisId)),
           })),
         },
       ];
     }
+
+    case "place_reviews":
+      return [
+        {
+          kind: "reviews",
+          items: items.slice(0, 5).map((x) => ({
+            rating: n(x.rating),
+            text: String(x.text ?? ""),
+            source: String(x.source ?? ""),
+            date: s(x.date),
+          })),
+        },
+      ];
 
     case "list_pharmacies":
       return [
@@ -217,6 +274,36 @@ export function cardsFrom(
     default:
       return [];
   }
+}
+
+/** Маршрут покупок: не список позиций, а одна сборка, поэтому отдельно. */
+export function routeCard(result: Record<string, unknown>): Card[] {
+  const stops = (result.stops as Row[]) ?? [];
+  if (result.error || stops.length === 0) return [];
+  return [
+    {
+      kind: "route",
+      total: n(result.total) ?? 0,
+      cheapestTotal: n(result.cheapestTotal) ?? 0,
+      oneStopTotal: n(result.oneStopTotal),
+      oneStopName: s(result.oneStopName),
+      missing: Array.isArray(result.missing) ? (result.missing as string[]) : [],
+      stops: stops.map((st) => ({
+        pharmacy: String(st.pharmacy ?? ""),
+        address: s(st.address),
+        phone: s(st.phone),
+        hours: s(st.hours),
+        twogisUrl: s(st.twogisUrl),
+        subtotal: n(st.subtotal) ?? 0,
+        lines: ((st.lines as Row[]) ?? []).map((l) => ({
+          title: String(l.title ?? ""),
+          packs: n(l.packs) ?? 1,
+          pricePerPack: n(l.pricePerPack) ?? 0,
+          subtotal: n(l.subtotal) ?? 0,
+        })),
+      })),
+    },
+  ];
 }
 
 /** compute_course отдаёт не список, а один расчёт, поэтому отдельно. */

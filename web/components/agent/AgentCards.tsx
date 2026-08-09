@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { MapPin, Phone, Pill, Gift, Calculator, Building2, ChevronRight } from "lucide-react";
+import {
+  MapPin, Phone, Pill, Gift, Calculator, Building2, ChevronRight, Route, Star,
+} from "lucide-react";
 import type { Card } from "@/lib/agent/cards";
 import { tenge } from "@/lib/format";
 
@@ -15,6 +17,24 @@ import { tenge } from "@/lib/format";
  */
 
 const BOX = "rounded-xl border border-line bg-surface p-3";
+
+/**
+ * Рейтинг числом, без текстов отзывов.
+ *
+ * Цитаты занимают полкарточки и всё равно не убеждают: человеку хватает
+ * «4,6 из 5 по 212 отзывам», а если захочет читать, откроет 2GIS, где их
+ * тысячи и они свежие.
+ */
+function Rating({ value, count }: { value: number | null; count: number | null }) {
+  if (value === null) return null;
+  return (
+    <span className="flex items-center gap-1">
+      <Star size={10} className="fill-brand text-brand" aria-hidden />
+      {value.toFixed(1).replace(".", ",")} из 5
+      {count ? ` (${count})` : ""}
+    </span>
+  );
+}
 
 export function AgentCard({ card }: { card: Card }) {
   switch (card.kind) {
@@ -70,36 +90,36 @@ export function AgentCard({ card }: { card: Card }) {
               : `${card.shown} аптек`}
           </p>
 
-          <ul className="mt-2 space-y-2">
+          {/* Вся строка это ссылка в 2GIS: своей страницы у аптеки нет и не
+              нужно, человеку нужен маршрут и отзывы, а они уже там. */}
+          <ul className="mt-2 space-y-1">
             {card.rows.map((r, i) => (
-              <li key={i} className="border-t border-line/60 pt-2 first:border-0 first:pt-0">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-xs font-medium text-ink">{r.pharmacy}</span>
-                  <span className="shrink-0 text-xs font-semibold tabular-nums text-ink">
-                    {tenge(r.price)}
-                  </span>
-                </div>
-                {r.address && (
-                  <a
-                    href={r.twogisUrl ?? undefined}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-0.5 flex items-start gap-1 text-[11px] text-muted hover:text-brand-ink"
-                  >
-                    <MapPin size={11} className="mt-0.5 shrink-0" aria-hidden />
-                    <span className="line-clamp-1">{r.address}</span>
-                  </a>
-                )}
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
-                  {r.phone && (
-                    <a href={`tel:${r.phone.split(",")[0].trim()}`} className="flex items-center gap-1 hover:text-brand-ink">
-                      <Phone size={10} aria-hidden />
-                      {r.phone.split(",")[0].trim()}
-                    </a>
+              <li key={i}>
+                <a
+                  href={r.twogisUrl ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="pressable -mx-1 block rounded-lg px-1 py-1.5 transition hover:bg-brand-wash/60"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate text-xs font-medium text-ink">{r.pharmacy}</span>
+                    <span className="shrink-0 text-xs font-semibold tabular-nums text-ink">
+                      {tenge(r.price)}
+                    </span>
+                  </div>
+                  {r.address && (
+                    <span className="mt-0.5 flex items-start gap-1 text-[11px] text-muted">
+                      <MapPin size={11} className="mt-0.5 shrink-0" aria-hidden />
+                      <span className="line-clamp-1">{r.address}</span>
+                    </span>
                   )}
-                  {r.packSize && <span>{r.packSize} шт.</span>}
-                  {r.updated && <span>{r.updated}</span>}
-                </div>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
+                    <Rating value={r.rating} count={r.reviews} />
+                    {r.packSize && <span>{r.packSize} шт.</span>}
+                    {r.updated && <span>{r.updated}</span>}
+                    <span className="text-brand-ink">2GIS →</span>
+                  </span>
+                </a>
               </li>
             ))}
           </ul>
@@ -157,21 +177,128 @@ export function AgentCard({ card }: { card: Card }) {
 
     case "service":
       return (
-        <Link href={card.href} className={`${BOX} pressable block transition hover:border-brand/40`}>
-          <span className="text-sm font-medium text-ink">{card.title}</span>
-          <ul className="mt-2 space-y-1">
+        <div className={BOX}>
+          <Link href={card.href} className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium text-ink">{card.title}</span>
+            <ChevronRight size={16} className="shrink-0 text-muted" aria-hidden />
+          </Link>
+          <ul className="mt-2 space-y-2">
             {card.rows.map((r, i) => (
-              <li key={i} className="flex items-baseline justify-between gap-2 text-xs">
-                <span className="truncate text-muted">{r.clinic}</span>
-                {r.price !== null && (
-                  <span className="shrink-0 font-semibold tabular-nums text-ink">
-                    {tenge(r.price)}
-                  </span>
+              <li key={i} className="border-t border-line/60 pt-2 first:border-0 first:pt-0">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-ink">{r.clinic}</span>
+                  {r.price !== null && (
+                    <span className="shrink-0 text-xs font-semibold tabular-nums text-ink">
+                      {tenge(r.price)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
+                  <Rating value={r.rating} count={r.reviews} />
+                  {r.phone && (
+                    <a href={`tel:${r.phone.split(",")[0].trim()}`} className="hover:text-brand-ink">
+                      {r.phone.split(",")[0].trim()}
+                    </a>
+                  )}
+                </div>
+                {r.address && (
+                  <a
+                    href={r.twogisUrl ?? undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-0.5 flex items-start gap-1 text-[11px] text-muted hover:text-brand-ink"
+                  >
+                    <MapPin size={11} className="mt-0.5 shrink-0" aria-hidden />
+                    <span className="line-clamp-1">{r.address}</span>
+                  </a>
                 )}
               </li>
             ))}
           </ul>
-        </Link>
+        </div>
+      );
+
+    case "route":
+      return (
+        <div className="rounded-xl border border-brand/30 bg-brand-wash/40 p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-ink">
+            <Route size={16} className="text-brand-ink" aria-hidden />
+            Маршрут покупок: {card.stops.length}{" "}
+            {card.stops.length === 1 ? "аптека" : "аптеки"}
+          </div>
+          <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
+            {tenge(card.total)}
+          </p>
+          <p className="text-xs text-muted">
+            Если объезжать весь город ради минимума: {tenge(card.cheapestTotal)}.
+            {card.oneStopTotal !== null && card.oneStopName && (
+              <> Если все в одной аптеке «{card.oneStopName}»: {tenge(card.oneStopTotal)}.</>
+            )}
+          </p>
+
+          <ol className="mt-3 space-y-2">
+            {card.stops.map((st, i) => (
+              <li key={i} className="rounded-lg border border-line bg-surface p-2.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-xs font-semibold text-ink">
+                    {i + 1}. {st.pharmacy}
+                  </span>
+                  <span className="shrink-0 text-xs font-semibold tabular-nums text-ink">
+                    {tenge(st.subtotal)}
+                  </span>
+                </div>
+                {st.address && (
+                  <a
+                    href={st.twogisUrl ?? undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-0.5 flex items-start gap-1 text-[11px] text-muted hover:text-brand-ink"
+                  >
+                    <MapPin size={11} className="mt-0.5 shrink-0" aria-hidden />
+                    <span className="line-clamp-1">{st.address}</span>
+                  </a>
+                )}
+                <ul className="mt-1.5 space-y-0.5">
+                  {st.lines.map((l, j) => (
+                    <li key={j} className="flex items-baseline justify-between gap-2 text-[11px]">
+                      <span className="truncate text-muted">
+                        {l.title}
+                        {l.packs > 1 && ` × ${l.packs}`}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-ink">{tenge(l.subtotal)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ol>
+
+          {card.missing.length > 0 && (
+            <p className="mt-2 text-[11px] text-muted">
+              Нет в наших данных: {card.missing.join(", ")}.
+            </p>
+          )}
+        </div>
+      );
+
+    case "reviews":
+      return (
+        <div className={BOX}>
+          <span className="text-sm font-medium text-ink">Что пишут в отзывах</span>
+          <ul className="mt-2 space-y-2">
+            {card.items.map((r, i) => (
+              <li key={i} className="border-t border-line/60 pt-2 text-xs first:border-0 first:pt-0">
+                {r.rating !== null && (
+                  <span className="mr-1 inline-flex items-center gap-0.5 text-[11px] text-muted">
+                    <Star size={10} className="fill-brand text-brand" aria-hidden />
+                    {r.rating.toFixed(1).replace(".", ",")}
+                  </span>
+                )}
+                <span className="text-muted">{r.text}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       );
 
     case "pharmacy":
@@ -186,6 +313,7 @@ export function AgentCard({ card }: { card: Card }) {
               <li key={i} className="text-xs">
                 <span className="font-medium text-ink">{r.name}</span>
                 {r.address && <div className="text-muted">{r.address}</div>}
+                <Rating value={r.rating} count={r.reviews} />
               </li>
             ))}
           </ul>

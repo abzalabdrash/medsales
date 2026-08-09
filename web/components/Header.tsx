@@ -3,7 +3,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { UserRound } from "lucide-react";
+import { Sparkles, UserRound } from "lucide-react";
 import { Logo } from "./Logo";
 import { CityPicker } from "./CityPicker";
 import { SearchBox } from "./SearchBox";
@@ -39,6 +39,13 @@ function HeaderInner() {
           className="hidden shrink-0 text-sm font-medium text-muted transition-colors hover:text-ink lg:block"
         >
           Аптеки
+        </Link>
+        <Link
+          href={withCity("/pomoshnik", city)}
+          className="pressable hidden shrink-0 items-center gap-1.5 rounded-lg bg-brand-wash px-2.5 py-1.5 text-sm font-semibold text-brand-ink transition-colors hover:bg-brand/15 sm:flex"
+        >
+          <Sparkles size={15} aria-hidden />
+          Помощник
         </Link>
         {showSearch ? (
           <div className="hidden min-w-0 flex-1 sm:block">
