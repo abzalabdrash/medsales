@@ -121,8 +121,8 @@ export function buildBasket(
     }
     if (near) {
       rows = [...rows].sort((a, b) => {
-        const da = haversineKm(near, a);
-        const db = haversineKm(near, b);
+        const da = haversineKm(near, a) ?? 999;
+        const db = haversineKm(near, b) ?? 999;
         if (Math.abs(da - db) > 0.2) return da - db;
         const ra = (a.rating ?? 0) - (b.rating ?? 0);
         if (Math.abs(ra) > 0.05) return -ra;
@@ -211,9 +211,8 @@ export function buildBasket(
       for (const [title, cand] of perPlace) {
         if (chosen.has(title)) continue;
         const floor = cheapest.get(title)!.price;
-        const dist = near ? haversineKm(near, cand.row) : 0;
+        const dist = near ? (haversineKm(near, cand.row) ?? 999) : 0;
         const overpay = cand.row.price - floor;
-        // Дальше FAR_KM только если экономия заметная.
         if (near && dist > FAR_KM && overpay > -ABS_SAVE_MIN) continue;
         if (cand.row.price <= floor * (1 + tolerance) || overpay <= ABS_SAVE_MIN) {
           chosen.set(title, cand);
@@ -228,15 +227,17 @@ export function buildBasket(
       let pick = rows[0];
       if (near) {
         const nearOk = rows.find(
-          (r) => haversineKm(near, r) <= FAR_KM && r.price <= floor + ABS_SAVE_MIN,
+          (r) => (haversineKm(near, r) ?? 999) <= FAR_KM && r.price <= floor + ABS_SAVE_MIN,
         );
         pick = nearOk ?? rows[0];
-        // если ближайший дороже floor+ABS — всё равно берём ближайший из топ
         if (!nearOk) {
           const nearest = [...rows].sort(
-            (a, b) => haversineKm(near, a) - haversineKm(near, b),
+            (a, b) => (haversineKm(near, a) ?? 999) - (haversineKm(near, b) ?? 999),
           )[0];
-          if (nearest && haversineKm(near, nearest) + 0.5 < haversineKm(near, pick)) {
+          if (
+            nearest &&
+            (haversineKm(near, nearest) ?? 999) + 0.5 < (haversineKm(near, pick) ?? 999)
+          ) {
             pick = nearest;
           }
         }
