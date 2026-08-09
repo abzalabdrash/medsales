@@ -101,7 +101,7 @@ export function SearchBox({
   return (
     <div ref={boxRef} className="relative">
       <div
-        className={`flex items-center gap-2 rounded-2xl border border-line bg-paper ${
+        className={`search-field flex items-center gap-2 rounded-2xl border border-line bg-paper focus-within:border-brand ${
           hero ? "px-4 shadow-sm" : "px-3"
         }`}
       >
@@ -128,7 +128,7 @@ export function SearchBox({
           aria-expanded={open}
           aria-controls="search-list"
           aria-autocomplete="list"
-          className={`w-full bg-transparent outline-none placeholder:text-muted ${
+          className={`w-full bg-transparent outline-none focus:outline-none focus-visible:outline-none placeholder:text-muted ${
             hero ? "h-14 text-lg" : "h-12"
           }`}
         />

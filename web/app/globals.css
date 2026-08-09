@@ -52,6 +52,13 @@ input,
   border-radius: 6px;
 }
 
+/* Внутри композера помощника и поисковой строки обводка только у внешней
+   рамки (focus-within:border-brand), не у input/textarea внутри. */
+.agent-composer :is(textarea, button, input):focus-visible,
+.search-field :is(input, button):focus-visible {
+  outline: none;
+}
+
 /* Tactile press feedback (Emil: buttons must feel responsive) */
 @media (hover: hover) and (pointer: fine) {
   .pressable:hover {

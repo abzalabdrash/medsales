@@ -1,5 +1,5 @@
 // Server-side retrieval for the chat assistant. Pulls a COMPACT, relevant slice
-// of MedPrice data for the user's question (RAG) instead of dumping the whole
+// of MedSales data for the user's question (RAG) instead of dumping the whole
 // city — keeps the model fast, grounded and cheap. Imports db.ts (node:sqlite),
 // so this is server-only. Handles BOTH service questions ("сколько стоит МРТ")
 // and clinic questions ("лучшая клиника/поликлиника", "что за клиника X").

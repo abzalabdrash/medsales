@@ -63,7 +63,7 @@ export default async function DrugsPage({
         Лекарства и цены
       </h1>
       <p className="mt-2 max-w-[620px] text-muted">
-        {totals.offers.toLocaleString("ru-RU")} позиций с ценами,{" "}
+        {totals.offers.toLocaleString("ru-RU")} наименований с ценами,{" "}
         {totals.withCap.toLocaleString("ru-RU")} сверяются с предельной ценой
         Минздрава. Считаем стоимость всего курса, а не одной упаковки.
       </p>

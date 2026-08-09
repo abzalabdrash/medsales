@@ -7,11 +7,13 @@ function ru(n: number): string {
 export function StatPills({
   prices,
   brands,
+  pharmacies,
   cities,
   locale,
 }: {
   prices: number;
   brands: number;
+  pharmacies: number;
   cities: number;
   locale: Locale;
 }) {
@@ -19,6 +21,7 @@ export function StatPills({
   const items = [
     { v: ru(prices), l: t.statPrices },
     { v: ru(brands), l: t.statClinics },
+    { v: ru(pharmacies), l: t.statPharmacies },
     { v: String(cities), l: t.statCities },
   ];
   return (
@@ -31,10 +34,6 @@ export function StatPills({
           <span className="font-bold tabular-nums text-ink">{s.v}</span> {s.l}
         </span>
       ))}
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5">
-        <span className="size-2 rounded-full bg-fresh" aria-hidden />{" "}
-        {t.updatedDaily}
-      </span>
     </div>
   );
 }

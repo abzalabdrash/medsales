@@ -32,7 +32,7 @@ export function Logo() {
         </svg>
       </span>
       <span className="hidden text-xl font-bold tracking-tight sm:inline">
-        MedPrice<span className="text-muted">.kz</span>
+        MedSales
       </span>
     </Link>
   );

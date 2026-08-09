@@ -278,10 +278,16 @@ export function getTotals() {
       `
     SELECT (SELECT COUNT(*) FROM brand) brands,
            (SELECT COUNT(*) FROM branch) branches,
-           (SELECT COUNT(*) FROM price WHERE price_kzt >= 100) prices
+           (SELECT COUNT(*) FROM price WHERE price_kzt >= 100) prices,
+           (SELECT COUNT(*) FROM pharmacy) pharmacies
   `,
     )
-    .get() as { brands: number; branches: number; prices: number };
+    .get() as {
+      brands: number;
+      branches: number;
+      prices: number;
+      pharmacies: number;
+    };
   return { ...result };
 }
 

@@ -84,8 +84,8 @@ export default async function ClinicPage({
   const reviewsUrl = firmUrl(effectiveCity, brand.name);
   const waText =
     locale === "kk"
-      ? `Сәлеметсіз бе! MedPrice.kz сайтынан «${brand.name}» қызметтері бойынша жазып отырмын.`
-      : `Здравствуйте! Пишу с сайта MedPrice.kz по поводу услуг в «${brand.name}».`;
+      ? `Сәлеметсіз бе! MedSales сайтынан «${brand.name}» қызметтері бойынша жазып отырмын.`
+      : `Здравствуйте! Пишу с сайта MedSales по поводу услуг в «${brand.name}».`;
 
   const btn =
     "pressable inline-flex min-h-[48px] items-center gap-1.5 rounded-xl border border-line bg-paper px-3 text-sm font-medium";

@@ -26,8 +26,8 @@ import { OfferWatchButton } from "./OfferWatchButton";
 import { useI18n } from "./I18nProvider";
 
 const WA_TEXT: Record<string, string> = {
-  ru: "Здравствуйте! Пишу с сайта MedPrice.kz, хочу уточнить цену на услугу.",
-  kk: "Сәлеметсіз бе! MedPrice.kz сайтынан жазып отырмын, қызмет бағасын білгім келеді.",
+  ru: "Здравствуйте! Пишу с сайта MedSales, хочу уточнить цену на услугу.",
+  kk: "Сәлеметсіз бе! MedSales сайтынан жазып отырмын, қызмет бағасын білгім келеді.",
 };
 
 export function OfferRow({

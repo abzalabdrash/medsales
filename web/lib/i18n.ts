@@ -223,8 +223,8 @@ export type Dict = {
   assistantCoreCta: string;
   statPrices: string;
   statClinics: string;
+  statPharmacies: string;
   statCities: string;
-  updatedDaily: string;
   statFrom: string;
   statTo: string;
   statAvg: string;
@@ -390,8 +390,8 @@ const DICT: Record<Locale, Dict> = {
     assistantCoreCta: "Открыть помощника",
     statPrices: "цен",
     statClinics: "клиник",
+    statPharmacies: "аптек",
     statCities: "городов",
-    updatedDaily: "обновляется ежедневно",
     statFrom: "от",
     statTo: "до",
     statAvg: "средняя",
@@ -555,8 +555,8 @@ const DICT: Record<Locale, Dict> = {
     assistantCoreCta: "Көмекшіні ашу",
     statPrices: "баға",
     statClinics: "клиника",
+    statPharmacies: "дәріхана",
     statCities: "қала",
-    updatedDaily: "күн сайын жаңарады",
     statFrom: "бастап",
     statTo: "дейін",
     statAvg: "орташа",

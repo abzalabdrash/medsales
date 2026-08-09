@@ -291,10 +291,26 @@ export function listDrugs(opts: {
     where.push("o.price_kzt <= ?");
     args.push(opts.maxPrice);
   }
+  // Одна карточка на препарат (drug_ref), не на каждое предложение сети —
+  // иначе витрина залита десятками «Аскорбиновая кислота» по 50–70 ₸.
+  const partition = opts.onlyMatched
+    ? "o.drug_ref_id"
+    : "COALESCE(o.drug_ref_id, o.name_norm)";
   const rows = db()
     .prepare(
-      `${LIST_SELECT} WHERE ${where.join(" AND ")}
-       ORDER BY o.price_kzt ASC LIMIT ? OFFSET ?`,
+      `WITH ranked AS (
+         SELECT o.id AS oid,
+                ROW_NUMBER() OVER (
+                  PARTITION BY ${partition}
+                  ORDER BY o.price_kzt ASC, o.id
+                ) AS rn
+         FROM drug_offer o
+         WHERE ${where.join(" AND ")}
+       )
+       ${LIST_SELECT}
+       JOIN ranked ON ranked.oid = o.id AND ranked.rn = 1
+       ORDER BY o.price_kzt ASC
+       LIMIT ? OFFSET ?`,
     )
     .all(...args, opts.limit ?? 48, opts.offset ?? 0) as Raw[];
   return rows.map(shape);
@@ -737,7 +753,7 @@ export const ATC_GROUPS: { code: string; name: string }[] = [
 export function atcGroupCounts(): Record<string, number> {
   const rows = db()
     .prepare(
-      `SELECT SUBSTR(r.atc, 1, 1) AS g, COUNT(*) AS n
+      `SELECT SUBSTR(r.atc, 1, 1) AS g, COUNT(DISTINCT o.drug_ref_id) AS n
        FROM drug_offer o JOIN drug_ref r ON r.id = o.drug_ref_id
        WHERE r.atc IS NOT NULL AND o.price_kzt > 0
        GROUP BY g`,
@@ -749,9 +765,20 @@ export function atcGroupCounts(): Record<string, number> {
 export function listByAtcGroup(group: string, limit = 48, offset = 0): DrugListItem[] {
   const rows = db()
     .prepare(
-      `${LIST_SELECT}
-       WHERE o.price_kzt > 0 AND SUBSTR(r.atc, 1, 1) = ?
-       ORDER BY o.price_kzt ASC LIMIT ? OFFSET ?`,
+      `WITH ranked AS (
+         SELECT o.id AS oid,
+                ROW_NUMBER() OVER (
+                  PARTITION BY o.drug_ref_id
+                  ORDER BY o.price_kzt ASC, o.id
+                ) AS rn
+         FROM drug_offer o
+         JOIN drug_ref r ON r.id = o.drug_ref_id
+         WHERE o.price_kzt > 0 AND SUBSTR(r.atc, 1, 1) = ?
+       )
+       ${LIST_SELECT}
+       JOIN ranked ON ranked.oid = o.id AND ranked.rn = 1
+       ORDER BY o.price_kzt ASC
+       LIMIT ? OFFSET ?`,
     )
     .all(group, limit, offset) as Raw[];
   return rows.map(shape);
@@ -760,7 +787,11 @@ export function listByAtcGroup(group: string, limit = 48, offset = 0): DrugListI
 export function drugTotals(): { offers: number; refs: number; free: number; withCap: number } {
   const one = (sql: string) => (db().prepare(sql).get() as { n: number }).n;
   return {
-    offers: one("SELECT COUNT(*) AS n FROM drug_offer WHERE price_kzt > 0"),
+    // На витрине считаем наименования (уникальный эталон), а не строки предложений
+    // по каждой аптеке — иначе «21 445 позиций» выглядит как каталог, полный дублей.
+    offers: one(
+      "SELECT COUNT(DISTINCT drug_ref_id) AS n FROM drug_offer WHERE price_kzt > 0 AND drug_ref_id IS NOT NULL",
+    ),
     refs: one("SELECT COUNT(*) AS n FROM drug_ref"),
     free: one("SELECT COUNT(*) AS n FROM free_drug"),
     // именно позиции с СОБСТВЕННЫМ потолком из приказа, а не унаследованным

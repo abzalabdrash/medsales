@@ -105,6 +105,7 @@ export default async function Home({
         <StatPills
           prices={totals.prices}
           brands={totals.brands}
+          pharmacies={totals.pharmacies}
           cities={CITIES.length}
           locale={locale}
         />

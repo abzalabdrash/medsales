@@ -106,15 +106,15 @@ export default function MapView({
     const center: [number, number] = valid.length
       ? [valid[0].lat, valid[0].lng]
       : [43.238, 76.945];
-    // Зум колесом выключен до первого клика по карте. Если включить сразу,
-    // карта перехватывает прокрутку страницы: человек листает список аптек,
-    // курсор проходит над картой — и страница застревает, а карта улетает в
-    // космос. После клика карта «активна» и колесо зумит; курсор ушёл —
-    // прокрутка снова принадлежит странице.
-    const map = L.map(ref.current, { scrollWheelZoom: false }).setView(
-      center,
-      12,
-    );
+    // Зум колесом и жестами всегда включён — без этого карта «мёртвая».
+    // Чтобы не перехватывать прокрутку страницы, колесо зумит только когда
+    // курсор над картой и карта в фокусе (после клика/тапа).
+    const map = L.map(ref.current, {
+      scrollWheelZoom: false,
+      doubleClickZoom: true,
+      touchZoom: true,
+      boxZoom: true,
+    }).setView(center, 12);
     mapRef.current = map;
     // CARTO Voyager: crisp, light, retina tiles (no API key). Cleaner than raw OSM.
     L.tileLayer(
@@ -169,12 +169,21 @@ export default function MapView({
       bounds.push([p.lat, p.lng]);
     }
     map.addLayer(cluster);
-    map.on("click", () => map.scrollWheelZoom.enable());
-    map.on("mouseout", () => map.scrollWheelZoom.disable());
+    // Клик/тап — карта «берёт» колесо. Курсор ушёл — страница снова скроллится.
+    // Плюс +/- контролы Leaflet всегда доступны для зума.
+    L.control.zoom({ position: "topright" }).addTo(map);
+    const armZoom = () => map.scrollWheelZoom.enable();
+    const disarmZoom = () => map.scrollWheelZoom.disable();
+    map.on("click", armZoom);
+    map.on("focus", armZoom);
+    map.getContainer().addEventListener("mouseenter", armZoom);
+    map.getContainer().addEventListener("mouseleave", disarmZoom);
     if (bounds.length > 1)
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
 
     return () => {
+      map.getContainer().removeEventListener("mouseenter", armZoom);
+      map.getContainer().removeEventListener("mouseleave", disarmZoom);
       map.remove();
       mapRef.current = null;
       markersRef.current = {};
